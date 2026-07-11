@@ -58,15 +58,19 @@ of bugs.
   loader unload into conveyor.
 - These make the fork visibly "yours" but are the largest builds.
 
-### F.0 Found bug — IslandTest over-sampling (from local test run 2026-07-11)
-`IslandTest.lua:18` fails: expects 9900 island vertices, `Island.findIslands`
-returns 10201 (101×101 — includes both boundary rows instead of losing one to
-half-grid spacing). Deterministic, in the course-generator island detection (the
-flagged error-prone axis). Slipped through because **CI's unit-test workflow runs
-only CourseManagerTest/CpMathUtilTest/MovingAverageTest** — not the courseGenerator
-or pathfinder suites. Two sub-tasks: (1) decide if the test expectation is stale or
-the scan regressed; (2) add the courseGenerator + pathfinder suites to CI so this
-can't drift again. Ties into theme C (island handling).
+### F.0 IslandTest + CI coverage — ✅ DONE (2026-07-11, `fork/crash-fixes`)
+`IslandTest.lua:18` expected 9900 island vertices; `Island.findIslands` returns
+10201. Investigated (docs-fork diagnostic): the 10201 is CORRECT — a clean 101×101
+inclusive 1 m grid over the |x|,|z|≤50 island, bbox exactly [-50,50]², all points
+off-field, zero duplicates. The 9900 was a STALE expectation from commit 4c1e8fc3,
+pre-dating later island-detection fixes (ae1df08e, f635d22f) that changed grid
+alignment to include both boundary rows. Fixed by updating the test expectation +
+comment (NOT the code — forcing 9900 would drop legitimate island coverage).
+
+Root cause of the drift: CI's `unit-test.yml` ran a hand-maintained list that
+omitted IslandTest.lua and VectorTest.lua (and duplicated SliderTest.lua). Rewrote
+the run step to auto-discover every `*Test.lua` in each test dir, so new tests are
+always picked up and the list can't drift again. All 23 suites now green in CI-shape.
 
 ### F. Code health (enabler, not user-facing)
 - Make `Courseplay.register` async (explicit TODO) — cuts startup cost over all

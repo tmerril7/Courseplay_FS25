@@ -14,7 +14,9 @@ function testIsland()
     local boundary = Polygon({Vertex(-100, -100), Vertex(100, -100), Vertex(100, 100), Vertex(-100, 100)})
     local field = CourseGenerator.Field('test', 1, boundary)
     local islandVertices = CourseGenerator.Island.findIslands(field)
-    -- theoretically, the island should have 10,000 vertices but due to the half grid spacing we lose one row.
-    lu.assertEquals(#islandVertices, 9900)
+    -- The island spans |x| <= 50 and |z| <= 50 (inclusive) and is scanned on a 1 m
+    -- grid, giving 101 x 101 = 10201 vertices (both boundary rows/columns at +/-50
+    -- are on the island). All are off-field with no duplicates.
+    lu.assertEquals(#islandVertices, 10201)
 end
 os.exit(lu.LuaUnit.run())

@@ -26,33 +26,22 @@ jobs:
         with:
           # because atan2 is deprecated in 5.3
           luaVersion: "5.2.4"
-      - name: Run unit tests
+      - name: Run all unit tests
+        # Auto-discovers every *Test.lua in each test directory so newly added
+        # tests are picked up automatically (no hand-maintained list to drift out
+        # of sync). Each test is run from its own directory because they
+        # require('include'). All tests run even if one fails, so every failure is
+        # reported; the step exits non-zero if any test failed.
         run: |
-          cd scripts/test
-          lua CourseManagerTest.lua
-          lua CpMathUtilTest.lua
-          lua MovingAverageTest.lua
-          lua LoggerTest.lua
-      - name: Run course generator unit tests
-        run: |
-          pushd scripts/courseGenerator/test
-          lua BlockSequencerTest.lua
-          lua CacheMapTest.lua
-          lua CenterTest.lua
-          lua FieldTest.lua
-          lua FieldworkCourseTest.lua
-          lua FieldworkCourseMultiVehicleTest.lua
-          lua HeadlandConnectorTest.lua
-          lua LineSegmentTest.lua
-          lua PolygonTest.lua
-          lua PolylineTest.lua
-          lua SliderTest.lua
-          lua RowPatternTest.lua
-          lua RowTest.lua
-          lua SliderTest.lua
-          lua TransformTest.lua
-          lua VertexTest.lua
-          lua WrapAroundIndexTest.lua
-          popd
-          pushd scripts/pathfinder/test
-          lua GraphPathfinderTest.lua
+          set -uo pipefail
+          overall=0
+          for dir in scripts/test scripts/courseGenerator/test scripts/pathfinder/test; do
+            echo "::group::$dir"
+            for t in "$dir"/*Test.lua; do
+              name="$(basename "$t")"
+              echo "--- $name ---"
+              ( cd "$dir" && lua "$name" ) || { echo "::error::FAILED $t"; overall=1; }
+            done
+            echo "::endgroup::"
+          done
+          exit $overall
