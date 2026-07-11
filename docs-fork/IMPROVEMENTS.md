@@ -58,6 +58,16 @@ of bugs.
   loader unload into conveyor.
 - These make the fork visibly "yours" but are the largest builds.
 
+### F.0 Found bug — IslandTest over-sampling (from local test run 2026-07-11)
+`IslandTest.lua:18` fails: expects 9900 island vertices, `Island.findIslands`
+returns 10201 (101×101 — includes both boundary rows instead of losing one to
+half-grid spacing). Deterministic, in the course-generator island detection (the
+flagged error-prone axis). Slipped through because **CI's unit-test workflow runs
+only CourseManagerTest/CpMathUtilTest/MovingAverageTest** — not the courseGenerator
+or pathfinder suites. Two sub-tasks: (1) decide if the test expectation is stale or
+the scan regressed; (2) add the courseGenerator + pathfinder suites to CI so this
+can't drift again. Ties into theme C (island handling).
+
 ### F. Code health (enabler, not user-facing)
 - Make `Courseplay.register` async (explicit TODO) — cuts startup cost over all
   vehicle types.
