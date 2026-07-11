@@ -55,9 +55,11 @@ end
 --- Event listeners
 ---------------------------------------------------------------------------------------------------------------------------
 function CpAISiloLoaderWorker:onLoad(savegame)
-	--- Register the spec: spec_CpAIBunkerSiloWorker
-    self.spec_cpAISiloLoaderWorker = self["spec_" .. CpAISiloLoaderWorker.SPEC_NAME]
-    local spec = self.spec_cpAISiloLoaderWorker
+    --- Read the spec via its full-name key; do NOT assign the engine-created
+    --- short alias (self.spec_cpAISiloLoaderWorker). That assignment can clobber
+    --- the engine alias with nil during a load/reload race, crashing external
+    --- readers. Mirrors upstream fix 8b20d0a9 (bunker silo spec).
+    local spec = self["spec_" .. CpAISiloLoaderWorker.SPEC_NAME]
     --- This job is for starting the driving with a key bind or the mini gui.
     spec.cpJob = g_currentMission.aiJobTypeManager:createJob(AIJobType.SILO_LOADER_CP)
     spec.cpJob:setVehicle(self, true)

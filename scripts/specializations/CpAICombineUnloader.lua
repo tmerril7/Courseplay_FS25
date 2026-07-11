@@ -149,9 +149,11 @@ end
 --- Event listeners
 ---------------------------------------------------------------------------------------------------------------------------
 function CpAICombineUnloader:onLoad(savegame)
-	--- Register the spec: spec_cpAICombineUnloader
-    self.spec_cpAICombineUnloader = self["spec_" .. CpAICombineUnloader.SPEC_NAME]
-    local spec = self.spec_cpAICombineUnloader
+    --- Read the spec via its full-name key; do NOT assign the engine-created
+    --- short alias (self.spec_cpAICombineUnloader). That assignment can clobber
+    --- the engine alias with nil during a load/reload race, crashing external
+    --- readers. Mirrors upstream fix 8b20d0a9 (bunker silo spec).
+    local spec = self["spec_" .. CpAICombineUnloader.SPEC_NAME]
     --- This job is for starting the driving with a key bind or the mini gui.
     spec.cpJob = g_currentMission.aiJobTypeManager:createJob(AIJobType.COMBINE_UNLOADER_CP)
     spec.cpJob:setVehicle(self)

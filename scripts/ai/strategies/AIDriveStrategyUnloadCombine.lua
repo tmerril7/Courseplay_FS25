@@ -1796,7 +1796,9 @@ function AIDriveStrategyUnloadCombine:updateCombineStatus()
     end
     -- add hysteresis to reversing info from combine, isReversing() may temporarily return false during reversing, make sure we need
     -- multiple update loops to change direction
-    local combineToUnloadReversing = self.combineToUnloadReversing + (self.combineToUnload:getCpDriveStrategy():isReversing() and 0.1 or -0.1)
+    -- AIDriveStrategyCombineCourse has no isReversing() method; check the combine vehicle
+    -- itself the same way the combine strategy does (see AIDriveStrategyCombineCourse).
+    local combineToUnloadReversing = self.combineToUnloadReversing + (AIUtil.isReversing(self.combineToUnload) and 0.1 or -0.1)
     if self.combineToUnloadReversing < 0 and combineToUnloadReversing >= 0 then
         -- direction changed
         self.combineToUnloadReversing = 1

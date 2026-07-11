@@ -82,8 +82,11 @@ end
 --- Event listeners
 ---------------------------------------------------------------------------------------------------------------------------
 function CpAIFieldWorker:onLoad(savegame)
-	--- Register the spec: spec_cpAIFieldWorker
-    self.spec_cpAIFieldWorker = CpAIFieldWorker.getSpec(self)
+    --- Use the engine-created short alias (spec_cpAIFieldWorker) as-is; do not
+    --- overwrite it here. Assigning self.spec_cpAIFieldWorker = getSpec(self)
+    --- can clobber the engine alias with nil during a load/reload race (the
+    --- full-name lookup is transiently nil), crashing external readers such as
+    --- CpJobParameters. See upstream fix 8b20d0a9 for the bunker silo spec.
     local spec = CpAIFieldWorker.getSpec(self)
     --- This job is for starting the driving with a key bind or the hud.
     spec.cpJob = g_currentMission.aiJobTypeManager:createJob(AIJobType.FIELDWORK_CP)
