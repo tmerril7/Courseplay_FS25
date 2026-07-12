@@ -1902,7 +1902,12 @@ function AIDriveStrategyUnloadCombine:driveToMovingCombine()
         self:startUnloadingCombine()
     end
 
-    if self.combineToUnload:getCpDriveStrategy():isWaitingForUnload() then
+    if self.combineToUnload:getCpDriveStrategy():isWaitingForUnload()
+            and not self.combineToUnload:getCpDriveStrategy():alwaysNeedsUnloader() then
+        -- A chopper / always-discharge harvester is *always* stopped and waiting until we get
+        -- under its pipe, so bailing here would deadlock (it never starts moving on its own).
+        -- Keep driving to the rendezvous; on arrival we start following its course, pull
+        -- alongside the pipe, and it resumes (see WAITING_FOR_UNLOAD_ON_FIELD in the combine).
         self:debug('combine is now stopped and waiting for unload, wait for it to call again')
         self:startWaitingForSomethingToDo()
         return

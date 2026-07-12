@@ -899,10 +899,27 @@ function AIDriveStrategyCombineCourse:callUnloaderWhenNeeded()
 
     local bestUnloader, bestEte
     if self:isWaitingForUnload() then
-        self:debug('callUnloaderWhenNeeded: stopped, need unloader here')
-        bestUnloader, _ = self:findUnloader(self.vehicle, nil)
-        if bestUnloader then
-            bestUnloader:getCpDriveStrategy():call(self.vehicle, nil)
+        if self:alwaysNeedsUnloader() then
+            -- A chopper / always-discharge harvester is stopped here only because it has no
+            -- trailer under the pipe yet -- it can't hold a load. The unloader must pull up
+            -- ALONGSIDE and follow the course, not nose up to a stopped combine (that pose gate
+            -- never passes for a front-mounted / auto-aim pipe and the two deadlock on proximity).
+            -- Find the nearest idle unloader the combine-based way (valid while we're stopped),
+            -- then CALL it with a rendezvous at our current course waypoint so it takes the
+            -- moving-combine path (DRIVING_TO_MOVING_COMBINE -> startCourseFollowingCombine).
+            -- Once it's under the pipe we resume (see WAITING_FOR_UNLOAD_ON_FIELD in driveUnloadOnField).
+            bestUnloader, _ = self:findUnloader(self.vehicle, nil)
+            if bestUnloader then
+                local ix = self.course:getCurrentWaypointIx()
+                self:debug('callUnloaderWhenNeeded: chopper stopped, set up moving rendezvous at wp %d', ix)
+                self:callUnloader(bestUnloader, ix, 0)
+            end
+        else
+            self:debug('callUnloaderWhenNeeded: stopped, need unloader here')
+            bestUnloader, _ = self:findUnloader(self.vehicle, nil)
+            if bestUnloader then
+                bestUnloader:getCpDriveStrategy():call(self.vehicle, nil)
+            end
         end
     else
         if not self.waypointIxWhenCallUnloader then
