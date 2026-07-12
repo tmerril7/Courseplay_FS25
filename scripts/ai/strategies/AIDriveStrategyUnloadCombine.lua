@@ -636,6 +636,13 @@ function AIDriveStrategyUnloadCombine:driveBesideCombine()
     -- use a factor to make sure we reach the pipe fast, but be more gentle while discharging
     local factor = strategy:isDischarging() and 0.75 or 2
     local combineSpeed = self.combineToUnload.lastSpeedReal * 3600
+    -- Feed-forward the harvester's INTENDED speed so the chaser accelerates WITH it instead of
+    -- lagging until the gap opens. Without this a resuming chopper outruns its chaser, loses the
+    -- trailer under the pipe and stops (the start-up stutter). Never go below the harvester's
+    -- actual speed (keeps the original steady/slow-down behaviour), and anticipate by at most a
+    -- few km/h so we don't lurch past it. getMaxSpeed() is 0 while the harvester is stopped/waiting,
+    -- so this won't make us charge a parked combine.
+    combineSpeed = math.max(combineSpeed, math.min(strategy:getMaxSpeed(), combineSpeed + 5))
     local speed = combineSpeed + CpMathUtil.clamp(dz * factor, -10, 15)
     if dz > 0 and speed < 2 then
         -- Giants does not like speeds under 2, it just stops. So if we calculated a small speed

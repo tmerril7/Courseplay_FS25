@@ -263,7 +263,14 @@ function AIDriveStrategyCombineCourse:getDriveData(dt, vX, vY, vZ)
         if self:isFull() then
             self:changeToUnloadOnField()
         elseif self:alwaysNeedsUnloader() then
-            if not self.pipeController:isFillableTrailerUnderPipe() then
+            -- A chaser following a chopper can briefly flicker in/out of the pipe's discharge
+            -- zone. Stopping on the first false frame causes a stop + back-up-a-few-waypoints
+            -- stutter. Allow a short grace period so momentary flickers don't stop us; if the
+            -- trailer is genuinely gone (chaser left to dump), we still stop after the grace.
+            if self.pipeController:isFillableTrailerUnderPipe() then
+                self.lastFillableTrailerUnderPipeTime = g_currentMission.time
+            elseif not self.lastFillableTrailerUnderPipeTime
+                    or (g_currentMission.time - self.lastFillableTrailerUnderPipeTime) > 1000 then
                 self:debug('Need an unloader to work but have no fillable trailer under the pipe')
                 self:changeToUnloadOnField()
             end

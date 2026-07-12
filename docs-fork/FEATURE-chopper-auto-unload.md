@@ -48,10 +48,27 @@ No manual intervention, no crash, no deadlock.
   worked — the failure was upstream in the approach, not the stopped/moving decision.
   The live log corrected the theory.
 
-## Known residual: stutter (TODO — smoothing)
-While following, the chopper periodically flips to "no fillable trailer under the
-pipe" and steps back a waypoint, then recovers. Self-corrects every time (acceptable)
-but not perfectly smooth — the chaser doesn't hold a rock-steady position under the
-front-mounted pipe. Candidate area: following offset / pipe-target tracking for
-rear-firing auto-aim pipes. Not yet addressed.
+## Smoothing pass (done, verified in-game)
+Two changes, both chopper-relevant:
+1. **Grace period before stopping** (`CombineCourse` WORKING branch): don't stop on
+   the first frame the pipe-trailer is lost; allow ~1 s so momentary flickers don't
+   trigger a stop + back-up-a-waypoint stutter. If the chaser is genuinely gone we
+   still stop after the grace.
+2. **Feed-forward chaser speed** (`UnloadCombine:driveBesideCombine`): the chaser
+   aimed at the harvester's *actual* (lagging) speed, so at engagement (both stopped)
+   it sat still until the gap opened — the harvester would accelerate away, lose the
+   trailer and stop. Now it feed-forwards the harvester's *intended* speed
+   (`getMaxSpeed()`, which is 0 while the harvester is waiting), bounded to never
+   below actual and at most +5 km/h above it, so they accelerate together.
+
+Result: startup sync fixed; steady straight-line following sustains ~9 s bursts at
+15 km/h before any drop-out (was near-instant loss before).
+
+## Known residual: drop-outs on headland turns (TODO)
+On turn-heavy areas (e.g. first headland) the chaser still loses pipe position through
+turns → the harvester stops → the chaser fully re-approaches (pathfind +
+DRIVING_TO_MOVING_COMBINE), a ~20-30 s gap. Straight rows are fine. This overlaps with
+BUG-chaser-hard-start-deadlock.md (both are "chaser can't hold/recover position in
+awkward geometry / turns"). Candidate area: following the combine *through* turns
+(FOLLOW_CHOPPER_THROUGH_TURN state exists) rather than dropping to re-approach.
 </content>
