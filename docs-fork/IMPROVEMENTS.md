@@ -106,25 +106,25 @@ reported crashes are already fixed** in the code we have. ALWAYS check
 - **#1236** (auger wagon collides w/ combine) — BEHAVIORAL (proximity sensors
   can't see folded pipe/header). Not a Lua crash. Deferred — tuning-heavy.
 
-## Fixes applied on `fork/crash-fixes` (2026-07-11)
-Triage found the #1227 race fix (8b20d0a9) was applied to the bunker-silo spec
-ONLY; four sibling specs still had the identical racy alias clobber. Applied the
-conservative core of that fix to all four:
-- `CpAIFieldWorker.lua` — dropped redundant `self.spec_cpAIFieldWorker =` clobber.
-- `CpAIBaleFinder.lua` — onLoad reads full-name key into local, no short-alias write.
-- `CpAICombineUnloader.lua` — same.
-- `CpAISiloLoaderWorker.lua` — same.
-Each stops `onLoad` writing the engine-created short alias (which a load/reload
-race can nil, crashing external readers like `CpJobParameters`). Other functions
-still read the (now un-clobbered) engine alias → strictly better, no regression.
-More conservative than upstream (didn't convert every internal read to getSpec).
+## ❌ REVERTED: the spec-alias "race fix" (commit d3f416ff → reverted 45a7c493)
+Triage inferred that the #1227 race fix (8b20d0a9, bunker silo) should apply to
+four sibling specs that use `self.spec_cpAIXxx = self["spec_"..SPEC_NAME]` in onLoad.
+This was WRONG and crashed the game on load (CpAIBaleFinder onLoadFinished: index
+nil `.cpJob`). **Corrected understanding:**
+- `self["spec_"..SPEC_NAME]` (full mod-prefixed key) is ENGINE-created, valid at onLoad.
+- `self.spec_cpAIBaleFinder` (SHORT alias) is NOT engine-created — it is created BY
+  that manual assignment, and ~12 other functions per file depend on it.
+- So the manual assignment is REQUIRED, not a redundant clobber. Upstream's bunker
+  fix works only because it converted EVERY function in that file to the full key; a
+  partial (onLoad-only) conversion breaks all short-alias readers.
+The four siblings were never buggy. Left as upstream. The latent #1230 `isReversing`
+change rode along in the same commit and was reverted too (dead code; revisit later
+as its own tested change if wanted).
+Lesson: `luac -p` only checks syntax; spec-load bugs only surface in-game. We now
+have an in-game test loop (see SETUP.md / BUG-lhii-fieldwork.md).
 
-Also fixed **#1230** latent bug: `AIDriveStrategyUnloadCombine:updateCombineStatus`
-called `getCpDriveStrategy():isReversing()` — a method the combine strategy lacks.
-Swapped to `AIUtil.isReversing(self.combineToUnload)`. NOTE: that function is
-currently dead code (no caller), so this is latent hardening, not a reproduced
-live crash. Did NOT reproduce #1230's actual runtime error in HEAD.
-
-⚠️ **Not runtime-verified** — no local Lua interpreter; the real test is loading
-the mod in-game (esp. an MP join). Verify before relying on it.
-</content>
+## ✅ FIXED: LH II forage harvester doesn't enable fieldwork (commit def7ece9)
+See `docs-fork/BUG-lhii-fieldwork.md`. One-line fix in `CpAIFieldWorker.lua`: the
+`Cutter` check now walks the whole attach tree (`hasChildVehicleWithSpecialization`)
+so a pickup header on a mounted forage-harvester unit (a grandchild) is detected.
+Diagnosed and verified in-game: `getCanStartCpFieldWork()` false → true.
