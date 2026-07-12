@@ -273,7 +273,11 @@ function CpAIFieldWorker:getCanStartCpFieldWork()
             AIUtil.hasImplementWithSpecialization(self, BaleLoader) or
             AIUtil.hasChildVehicleWithSpecialization(self, ForageWagon) or
             -- built in helper can't handle forage harvesters.
-            AIUtil.hasImplementWithSpecialization(self, Cutter) or
+            -- Recursive (whole attach tree), not just directly attached: a pickup/
+            -- header can sit on a mounted forage-harvester unit (e.g. Lacotech LH II),
+            -- making the Cutter a grandchild of the tractor. Matches how self-propelled
+            -- harvesters (header as direct child) already work.
+            AIUtil.hasChildVehicleWithSpecialization(self, Cutter) or
             AIUtil.hasChildVehicleWithSpecialization(self, VineCutter) or
             AIUtil.hasChildVehicleWithSpecialization(self, VinePrepruner) or
             --- This also allows the use of stump cutters, that work like a mulcher.
