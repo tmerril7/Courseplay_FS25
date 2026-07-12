@@ -64,11 +64,17 @@ Two changes, both chopper-relevant:
 Result: startup sync fixed; steady straight-line following sustains ~9 s bursts at
 15 km/h before any drop-out (was near-instant loss before).
 
-## Known residual: drop-outs on headland turns (TODO)
-On turn-heavy areas (e.g. first headland) the chaser still loses pipe position through
-turns → the harvester stops → the chaser fully re-approaches (pathfind +
-DRIVING_TO_MOVING_COMBINE), a ~20-30 s gap. Straight rows are fine. This overlaps with
-BUG-chaser-hard-start-deadlock.md (both are "chaser can't hold/recover position in
-awkward geometry / turns"). Candidate area: following the combine *through* turns
-(FOLLOW_CHOPPER_THROUGH_TURN state exists) rather than dropping to re-approach.
+## Turn-following: CONFIRMED WORKING (2026-07-12 clean hands-off run)
+Earlier "turn drop-out" reports were an artifact of manual stop/start during testing.
+In a clean hands-off run the chaser followed a 180 turn correctly:
+`UNLOADING_MOVING_COMBINE -> Start chopper 180 turn -> HANDLE_CHOPPER_180_TURN ->
+FOLLOW_CHOPPER_THROUGH_TURN -> "chopper is ending/ended turn, return to follow mode"`.
+No deadlocks/errors; only 2 momentary mid-follow stalls in the whole run. Not a problem.
+
+## Real remaining friction: the full/dump cycle (see BUG-chaser-fullreturn-weird-path.md)
+The dominant time-sink is the when-full behavior. Trailer fills fast vs chopper
+throughput (15 full cycles in one run); each time the chaser drives back to its start
+position on a poor path and the task ENDS (hands control to Giants/AD), requiring a
+manual restart every couple of minutes. This -- not turns -- is the next thing to fix:
+ideally dump into a nearby trailer/heap (self-unload) and resume, instead of ending.
 </content>
