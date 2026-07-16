@@ -147,7 +147,10 @@ AIDriveStrategyUnloadCombine.myStates = {
     DRIVING_BACK_TO_START_POSITION_WHEN_FULL = {}, -- Drives to the start position with a trailer attached and gives control to giants or AD there.
     HANDLE_CHOPPER_180_TURN = { reversing = false, denyBackupRequest = true },
     HANDLE_CHOPPER_HEADLAND_TURN = { reversing = false, denyBackupRequest = true },
-    FOLLOW_CHOPPER_THROUGH_TURN = {}
+    FOLLOW_CHOPPER_THROUGH_TURN = {},
+    -- 2-chaser convoy: trail the active chaser (not assigned to the combine) so we can take
+    -- over the pipe quickly when it fills and peels off.
+    FOLLOW_ACTIVE_UNLOADER = {}
 }
 
 -------------------------------------------------
@@ -422,7 +425,17 @@ function AIDriveStrategyUnloadCombine:getDriveData(dt, vX, vY, vZ)
             self.checkForTrailerToUnloadTo:set(false, 10000)
             self:debug('Trailers over %d fill level', self.settings.fullThreshold:getValue())
             self:startUnloadingTrailers()
+        elseif not self:getAllTrailersFull() then
+            -- 2-chaser convoy: if another chaser is already serving a harvester on our field,
+            -- tuck in behind it instead of parking, so we can take over the pipe fast when it
+            -- fills and leaves. (Only one follower; a 3rd chaser stays idle.)
+            local harvester = self:findActiveHarvesterToStageBehind()
+            if harvester then
+                self:startStagingBehindActiveUnloader(harvester)
+            end
         end
+    elseif self.state == self.states.FOLLOW_ACTIVE_UNLOADER then
+        self:stageBehindActiveUnloader()
     elseif self.state == self.states.WAITING_FOR_PATHFINDER then
         -- just wait for the pathfinder to finish
         self:setMaxSpeed(0)
@@ -1414,6 +1427,15 @@ end
 -- or alignment, that is, we only call this when isOkToStartUnloadingCombine() says it is ok
 ------------------------------------------------------------------------------------------------------------------------
 function AIDriveStrategyUnloadCombine:startCourseFollowingCombine()
+    -- Fresh unload attempt: clear any stale deadlock latch. isInDeadlock() uses a CpDelayedBoolean
+    -- that, once latched true, is only ever reset while polled in UNLOADING_MOVING_COMBINE with the
+    -- stall condition false. But a deadlock exits via MOVING_BACK -> re-approach -> here, and a
+    -- trailer-full peel-off exits to dump -> return -> here, and in neither path is the latch polled
+    -- false, so it stays true and instantly re-trips the next takeover (15 ms, not 10 s). Resetting
+    -- on every fresh takeover gives each attempt its own full detection window.
+    if self.inDeadlock then
+        self.inDeadlock:reset()
+    end
     local startIx
     self.followCourse, startIx = self:setupFollowCourse()
     self.followingCourseOffset = self:getFollowingCourseOffset(self.combineToUnload)
@@ -1422,6 +1444,142 @@ function AIDriveStrategyUnloadCombine:startCourseFollowingCombine()
     self:debug('Will follow combine\'s course at waypoint %d, side offset %.1f', startIx, self.followCourse.offsetX)
     self:startCourse(self.followCourse, startIx)
     self:setNewState(self.states.UNLOADING_MOVING_COMBINE)
+end
+
+------------------------------------------------------------------------------------------------------------------------
+-- 2-chaser convoy: stage behind the active chaser
+-- When another chaser is already unloading a harvester on our field, we tuck in behind it and
+-- follow the harvester's course (but do NOT get under the pipe or register as the combine's
+-- unloader). We stay isAllowedToBeCalled, so when the active chaser fills and releases the
+-- combine, the combine calls us and we take over from close range instead of a long re-approach.
+------------------------------------------------------------------------------------------------------------------------
+
+--- Find a harvester on our field that already has a DIFFERENT active unloader we can stage
+--- behind. Returns the harvester vehicle, or nil. Caps the convoy at 2 (one active + one
+--- follower) by refusing if another chaser is already staging behind the same harvester.
+function AIDriveStrategyUnloadCombine:findActiveHarvesterToStageBehind()
+    for _, vehicle in pairs(g_currentMission.vehicleSystem.vehicles) do
+        if AIDriveStrategyCombineCourse.isActiveCpCombine(vehicle) then
+            local strategy = vehicle:getCpDriveStrategy()
+            if strategy and strategy.unloader and strategy.getFieldworkCourse and strategy:getFieldworkCourse() then
+                local x, _, z = getWorldTranslation(vehicle.rootNode)
+                if self:isServingPosition(x, z, 10) then
+                    -- unloader:get() holds the unloader STRATEGY (not the vehicle); compare to self
+                    local activeUnloader = strategy.unloader:get()
+                    if activeUnloader ~= nil and activeUnloader ~= self
+                            and not self:anotherUnloaderIsStagingBehind(vehicle) then
+                        return vehicle
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
+
+--- 2-cap: is some other chaser already staging behind this harvester?
+function AIDriveStrategyUnloadCombine:anotherUnloaderIsStagingBehind(harvester)
+    for strategy, _ in pairs(AIDriveStrategyUnloadCombine.activeUnloaders) do
+        if strategy ~= self and strategy.state == strategy.states.FOLLOW_ACTIVE_UNLOADER
+                and strategy.harvesterToStageBehind == harvester then
+            return true
+        end
+    end
+    return false
+end
+
+function AIDriveStrategyUnloadCombine:startStagingBehindActiveUnloader(harvester)
+    local combineStrategy = harvester:getCpDriveStrategy()
+    local combineCourse = combineStrategy:getFieldworkCourse()
+    if not combineCourse then
+        return
+    end
+    -- we are not assigned to any combine while staging (must stay nil so the getDriveData
+    -- auto-register at the top does not steal the active chaser's slot).
+    self.combineToUnload = nil
+    self.harvesterToStageBehind = harvester
+    self.followCourse = combineCourse:copy(self.vehicle)
+    self.followingCourseOffset = self:getFollowingCourseOffset(harvester)
+    self.followCourse:setOffset(self.followingCourseOffset, 0)
+    local startIx = combineStrategy:getClosestFieldworkWaypointIx() or combineCourse:getCurrentWaypointIx()
+    self:startCourse(self.followCourse, startIx)
+    self:setNewState(self.states.FOLLOW_ACTIVE_UNLOADER)
+    self:debug('Staging behind active unloader of %s, following its course at wp %d, offset %.1f',
+            CpUtil.getName(harvester), startIx, self.followingCourseOffset)
+end
+
+--- Trail the active chaser: follow the harvester's course at the following offset, keeping pace.
+--- The proximity controller holds a gap behind the active chaser. We never set combineToUnload
+--- (so we don't auto-register / steal the active chaser's slot). PPC drives the course.
+function AIDriveStrategyUnloadCombine:stageBehindActiveUnloader()
+    local harvester = self.harvesterToStageBehind
+    if harvester == nil or not AIDriveStrategyCombineCourse.isActiveCpCombine(harvester) then
+        self:debug('Harvester to stage behind no longer active, back to idle')
+        self.harvesterToStageBehind = nil
+        self:startWaitingForSomethingToDo()
+        return
+    end
+    local combineStrategy = harvester:getCpDriveStrategy()
+    -- Stage on the SAME line as the active chaser: getFollowingCourseOffset uses the auto-aim
+    -- pipe side, which is only computed for combineToUnload (nil while staging). Compute it
+    -- against the harvester so we trail behind the active chaser's line, not the centreline
+    -- (offset 0 would aim us at the harvester's rear and crowd it).
+    self:calculateAutoAimPipeOffsetX(harvester)
+    self.followingCourseOffset = self:getFollowingCourseOffset(harvester)
+    self.followCourse:setOffset(self.followingCourseOffset, 0)
+    -- Speed: hold a safe gap behind the active chaser. Drive faster than the harvester when far
+    -- behind (to actually close in), ease to the harvester's speed at the target gap, and brake
+    -- hard (down to a stop) when inside the gap so we never enter the primary's proximity zone
+    -- (which makes it flee with MOVING_AWAY_FROM_OTHER_VEHICLE and disengage).
+    local harvesterSpeed = math.max(harvester.lastSpeedReal * 3600, combineStrategy:getMaxSpeed())
+    local speed = harvesterSpeed
+    -- unloader:get() holds the active chaser's STRATEGY; its vehicle is on .vehicle
+    local activeChaserStrategy = combineStrategy.unloader and combineStrategy.unloader:get()
+    local activeChaser = activeChaserStrategy ~= nil and activeChaserStrategy ~= self and activeChaserStrategy.vehicle
+    if activeChaser then
+        -- ANTI-OVERTAKE INVARIANT: stay strictly BEHIND the active chaser. Straight-line distance
+        -- lies during turns (the inside of a turn is a shorter path, so following the course can cut
+        -- the corner and slingshot us past A -- which then parks us in A's unload spot and jams the
+        -- whole convoy). Measure progress along the HARVESTER's heading instead: project both
+        -- chasers onto the harvester's direction node. aheadOfA > 0 means A is that many metres in
+        -- front of us (good, we trail); as it falls to 0 we've drawn level; negative = we overtook.
+        local _, _, aFwd = localToLocal(activeChaser:getAIDirectionNode(), harvester:getAIDirectionNode(), 0, 0, 0)
+        local _, _, myFwd = localToLocal(self.vehicle:getAIDirectionNode(), harvester:getAIDirectionNode(), 0, 0, 0)
+        local aheadOfMe = aFwd - myFwd
+        local bx, _, bz = getWorldTranslation(self.vehicle.rootNode)
+        local ax, _, az = getWorldTranslation(activeChaser.rootNode)
+        local dist = math.sqrt((ax - bx) * (ax - bx) + (az - bz) * (az - bz))
+        local targetGap = 28        -- metres behind A (safely outside its proximity)
+        local overtakeMargin = 10   -- A must stay at least this many metres ahead of us
+        if aheadOfMe < overtakeMargin then
+            -- level with / ahead of / crowding A: yield. Brake to a stop so we never take A's spot.
+            speed = 0
+            -- SELF-HEAL: if we actually overtook (A behind us) and are jammed against a stuck A
+            -- under a waiting harvester, WE are the blocker. Physically back off 15 m and re-stage
+            -- so A can reach the pipe; the deadlock can't clear until we vacate the spot.
+            if aheadOfMe < 0 and dist < 15 and combineStrategy:isWaitingForUnload()
+                    and AIUtil.isStopped(activeChaser) then
+                self:debug('staging: overtook & blocking a stuck active chaser (A %.0fm behind, %.0fm away) -> back off and re-stage',
+                        -aheadOfMe, dist)
+                self.harvesterToStageBehind = nil
+                self:startMovingBackFromCombine(self.states.MOVING_BACK, harvester)
+                return
+            end
+            self:debugSparse('staging: overtake guard, A only %.0fm ahead (< %dm), %.0fm away -> holding',
+                    aheadOfMe, overtakeMargin, dist)
+        elseif not combineStrategy:isTurning() then
+            -- straights, safely behind: close the distance gap toward targetGap behind A.
+            -- lower clamp = -harvesterSpeed so speed can fall to 0 when inside the gap (firm brake)
+            speed = harvesterSpeed + CpMathUtil.clamp((dist - targetGap) * 0.8, -harvesterSpeed, 15)
+            self:debugSparse('staging: %.0fm behind A (%.0fm ahead-of-me), offset %.1f, speed %.1f (harvester %.1f)',
+                    dist, aheadOfMe, self.followingCourseOffset, speed, harvesterSpeed)
+        else
+            -- turning and safely behind: follow the course at the harvester's speed, never boost past
+            self:debugSparse('staging (turn): A %.0fm ahead, %.0fm away, follow at harvester speed %.1f',
+                    aheadOfMe, dist, harvesterSpeed)
+        end
+    end
+    self:setMaxSpeed(math.max(0, speed))
 end
 
 function AIDriveStrategyUnloadCombine:getCombineToUnload()
@@ -1598,7 +1756,10 @@ function AIDriveStrategyUnloadCombine:isIdle()
 end
 
 function AIDriveStrategyUnloadCombine:isAllowedToBeCalled()
+    -- also callable while staging behind the active chaser (2-chaser convoy): that is exactly
+    -- when we want the combine to pick us for a fast, close-range handover.
     return self:isIdle() or self:hasToWaitForAssignedCombine()
+            or self.state == self.states.FOLLOW_ACTIVE_UNLOADER
 end
 
 --- Get the Dubins path length and the estimated seconds en-route to gaol
