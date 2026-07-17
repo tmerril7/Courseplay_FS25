@@ -76,6 +76,24 @@ re-stages behind B, repeating). Landed in AIDriveStrategyUnloadCombine.lua:
 - **Self-heal (fix):** if B has actually overtaken and is jammed against a stuck A under a waiting
   harvester, B backs off 15 m (MOVING_BACK) and re-stages so A can reach the pipe. Safety net;
   never needed once the gate was in.
+- **Forecast-intercept join (2026-07-16):** a chaser joining from far (e.g. returned via AD to the
+  field edge) no longer PPC-drives straight at a 100 m+ course waypoint (which cut across terrain
+  and off the field). `startStagingBehindActiveUnloader` splits near (≤45 m → follow directly) vs
+  far (→ `startDrivingToStagePosition`): forecast where the ACTIVE CHASER will be when we arrive
+  (its speed × our Dubins ETE), aim a `followGap` (25 m) behind that, pathfind there (new
+  `DRIVING_TO_STAGE` state), tuck in on arrival. Referencing the active chaser (not the combine,
+  which is ~a gap further forward) was essential — referencing the combine overshot and landed us
+  ahead of A, tripping the guard and letting A escape. Callable mid-approach (`isAllowedToBeCalled`).
+- **Trail-follow through turns (2026-07-16):** following our laterally-offset course through a tight
+  headland/180 turn cut the inside and lunged at the combine. Now we record the active chaser's path
+  as a breadcrumb trail (`recordStagedLeaderTrail`, 2 m spacing) and steer along it through the turn
+  (`getStagedLeaderTrailGoal`, 8 m lookahead). Two subtleties that each caused an overtake:
+  (a) a 180 doubles the path back on itself, so a nearest-point search latched onto the return leg —
+  fixed with a MONOTONIC progress index (`stagedTrailIx`, only searches a few points forward);
+  (b) handing back to the course the instant `isTurning()` cleared snapped our nearest waypoint to the
+  new row next to the combine → a forward dash — fixed with a `trailingThroughTurn` flag that keeps
+  trailing until we're lined up behind A on the new straight (A ≥15 m ahead AND headings aligned <30°).
+  Result: verified "very smooth" in-game across turns; 0 sustained overtakes, 0 jams.
 
 ### Known limitation — re-engagement after full (NOT a convoy bug)
 The re-stage-on-return cycle only closes automatically when a chaser empties WITHOUT ending its
