@@ -678,7 +678,8 @@ end
 --- This is to set the offsets on the course at start, or update those values
 --- if the user changed them during the run or the AI driver wants to add an offset
 function AIDriveStrategyCourse:updateFieldworkOffset(course)
-    course:setOffset(self.settings.toolOffsetX:getValue() + (self.aiOffsetX or 0) + (self.tightTurnOffset or 0),
+    course:setOffset(self.settings.toolOffsetX:getValue() + (self.aiOffsetX or 0) + (self.tightTurnOffset or 0)
+            + (self.frontOverhangOffset or 0),
             (self.aiOffsetZ or 0))
 end
 

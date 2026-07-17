@@ -324,7 +324,8 @@ function AIDriveStrategyCombineCourse:updateFieldworkOffset(course)
         -- do not apply fieldwork offset when not doing fieldwork
         course:setOffset((self.aiOffsetX or 0) + (self.tightTurnOffset or 0), (self.aiOffsetZ or 0))
     else
-        course:setOffset(self.settings.toolOffsetX:getValue() + (self.aiOffsetX or 0) + (self.tightTurnOffset or 0),
+        course:setOffset(self.settings.toolOffsetX:getValue() + (self.aiOffsetX or 0) + (self.tightTurnOffset or 0)
+                + (self.frontOverhangOffset or 0),
                 (self.aiOffsetZ or 0))
     end
 end

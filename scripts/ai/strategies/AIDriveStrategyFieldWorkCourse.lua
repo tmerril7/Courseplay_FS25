@@ -45,6 +45,8 @@ function AIDriveStrategyFieldWorkCourse:init(task, job)
     self.turnNodes = {}
     -- course offsets dynamically set by the AI and added to all tool and other offsets
     self.aiOffsetX, self.aiOffsetZ = 0, 0
+    -- lateral offset to keep a front-mounted work implement on the row through curves
+    self.frontOverhangOffset = 0
     self.debugChannel = CpDebug.DBG_FIELDWORK
     self.waitingForPrepare = CpTemporaryObject(false)
 end
@@ -729,8 +731,13 @@ function AIDriveStrategyFieldWorkCourse:calculateTightTurnOffset()
         -- when rounding small islands or to start on a course with curves
         self.tightTurnOffset = AIUtil.calculateTightTurnOffset(self.vehicle, self.turningRadius, self.course,
                 self.tightTurnOffset)
+        -- a front-mounted tool (cutter/pickup header) reaches ahead of the steering reference and swings
+        -- wide on curves; nudge the course towards the inside so it stays on the row
+        self.frontOverhangOffset = AIUtil.calculateFrontMountedOffset(self.vehicle, self.turningRadius,
+                self.frontMarkerDistance, self.course, self.frontOverhangOffset)
     else
         self.tightTurnOffset = 0
+        self.frontOverhangOffset = 0
     end
 end
 

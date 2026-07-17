@@ -147,6 +147,101 @@ function AIUtil.calculateTightTurnOffsetForTurnManeuver(vehicle, steeringLength,
 end
 
 
+--- A rigidly front-mounted work implement (e.g. a front cutter/pickup header) reaches well ahead
+--- of the vehicle's direction node (the point the PPC keeps on the course). A point that far ahead
+--- of the steering reference swings to the OUTSIDE of every curve, so the header rides past the row
+--- and misses crop as the vehicle rounds headland corners or drives curved rows.
+--- To compensate, move the followed course towards the INSIDE of the curve by just enough that the
+--- front working point stays on the row line.
+---
+--- We measure this from the HEADING CHANGE across the span between the vehicle and the front working
+--- point (frontMarkerDistance ahead), not from the curvature at a single point. That matters for the
+--- entry and exit of a bend: reading one point makes the offset switch on/off almost as a step, which
+--- over-corrects entering the bend (the full offset slams on while the vehicle is still on the straight,
+--- so it cuts inside) and releases early leaving it (the offset drops while the vehicle is still in the
+--- arc, so the header strays outside). Using the heading change over the whole span ramps it naturally:
+--- at the entry only the front of the span is curved, so the offset eases in; at the exit only the rear
+--- is, so it eases out.
+---
+--- Magnitude: a point d ahead, over a span whose heading turns by dTheta, sits about d/2 * dTheta off the
+--- straight-ahead line (equals the steady-state d^2 / 2R on a constant arc of radius R = d / dTheta). The
+--- sign of dTheta is the turn direction, so it also gives the correction direction directly.
+---@param vehicle table
+---@param vehicleTurningRadius number (unused; kept for call-site compatibility)
+---@param frontMarkerDistance number distance from the direction node to the front of the work area (> 0 if ahead)
+---@param course Course
+---@param previousOffset number|nil last offset for smoothing
+---@return number lateral course offset (positive = right in the engine's -z-forward convention), towards the inside
+function AIUtil.calculateFrontMountedOffset(vehicle, vehicleTurningRadius, frontMarkerDistance, course, previousOffset)
+	-- Moderate smoothing (0.6 carry-over): damps the slight hunt at the ends of a bend, and the small lag
+	-- it adds is helpful here - it delays the ramp, which softens the two transition artifacts a lateral
+	-- offset can't fully avoid (cutting in as the tool enters, swinging wide as it leaves). Raise the
+	-- carry-over if it still oscillates, lower it if the correction lags into/out of bends.
+	local function smoothOffset(offset)
+		return (2 * offset + 3 * (previousOffset or 0)) / 5
+	end
+
+	-- only relevant when the work area actually reaches ahead of the direction node (front-mounted tool)
+	if not frontMarkerDistance or frontMarkerDistance < 0.5 then
+		return smoothOffset(0)
+	end
+
+	-- span from the vehicle to the front working point
+	local currentIx = course:getCurrentWaypointIx()
+	local headerIx = course:getNextWaypointIxWithinDistance(currentIx, frontMarkerDistance) or currentIx
+	local aVehicle = course:getWaypointAngleDeg(currentIx)
+	local aHeader = course:getWaypointAngleDeg(headerIx)
+	local spanDistance = course:getDistanceBetweenWaypoints(currentIx, headerIx)
+	if not aVehicle or not aHeader or not spanDistance or spanDistance < 0.5 then
+		return smoothOffset(0)
+	end
+
+	-- Curvature over the span = heading change per metre. Normalising by the ACTUAL span distance (rather
+	-- than assuming it equals frontMarkerDistance) removes the jitter from the look-ahead landing on whole
+	-- waypoints, which was the span length - and so the offset - twitching between updates.
+	-- Verified in-game that dTheta > 0 is a right-hand curve and wants a positive (rightward) offset to pull
+	-- the outward-swinging front point back onto the row; the sign of dTheta gives the direction directly.
+	local dTheta = CpMathUtil.getDeltaAngle(math.rad(aHeader), math.rad(aVehicle))
+	local curvature = dTheta / spanDistance
+	-- offset that keeps a point d ahead on the line on an arc of radius 1/curvature: d^2 * curvature / 2
+	local offset = frontMarkerDistance * frontMarkerDistance * curvature / 2
+	-- clamp to a sane magnitude in case of an unexpectedly sharp course section
+	offset = math.max(-frontMarkerDistance, math.min(frontMarkerDistance, offset))
+	if offset ~= offset then
+		-- check for nan
+		return smoothOffset(0)
+	end
+	-- ignore anything below a few cm, i.e. (near) straight rows where the swing is negligible
+	if math.abs(offset) < 0.05 then
+		return smoothOffset(0)
+	end
+
+	local frontOffset = smoothOffset(offset)
+	CpUtil.debugVehicle(CpDebug.DBG_TURN, vehicle,
+			'Front-mounted tool: overhang = %.1f m, span %.1f m dTheta = %.1f deg (header ix %d), offset = %.2f, smoothOffset = %.2f',
+			frontMarkerDistance, spanDistance, math.deg(dTheta), headerIx, offset, frontOffset)
+	return frontOffset
+end
+
+--- A rigidly front-mounted implement that reaches well ahead of the vehicle (front cutter/pickup header)
+--- swings to the outside coming out of a turn and enters the new row off-centre, missing crop near the
+--- row start. Driving a gentler (larger) arc reduces that outward swing and the curvature transient as the
+--- turn straightens onto the row, so the header is tracking straighter by the time it reaches the crop.
+--- A point d ahead of the vehicle rides an arc of radius sqrt(r^2 + d^2) when the vehicle drives radius r;
+--- we widen the vehicle's turn radius by that same relation so the swing scales out with the overhang,
+--- bounded to 1.5x so tight fields can still turn (a too-wide radius forces reversing/pathfinder turns).
+---@param baseRadius number the vehicle's normal turning radius
+---@param frontMarkerDistance number|nil distance from the direction node to the front of the work area (>0 if ahead)
+---@return number the (possibly widened) turn radius
+function AIUtil.getFrontMountedTurnRadius(baseRadius, frontMarkerDistance)
+	if not frontMarkerDistance or frontMarkerDistance < 0.5 then
+		-- rear-mounted/towed or negligible overhang: leave the radius alone
+		return baseRadius
+	end
+	local widened = math.sqrt(baseRadius * baseRadius + frontMarkerDistance * frontMarkerDistance)
+	return math.min(widened, baseRadius * 1.5)
+end
+
 function AIUtil.getTowBarLength(vehicle)
 	-- is there a wheeled implement behind the tractor and is it on a pivot?
 	local implement = AIUtil.getFirstReversingImplementWithWheels(vehicle, true)

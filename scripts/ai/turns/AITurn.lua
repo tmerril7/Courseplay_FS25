@@ -57,7 +57,16 @@ function AITurn:init(vehicle, driveStrategy, ppc, proximityController, turnConte
     self.workEndHandler = WorkEndHandler(vehicle, driveStrategy)
     self.workStartHandler = WorkStartHandler(vehicle, driveStrategy, turnContext)
     self.settings = vehicle:getCpSettings()
-    self.turningRadius = AIUtil.getTurningRadius(self.vehicle)
+    -- widen the arc for a long front-mounted implement so its working point stays on the row entering the
+    -- new row (the turn-type decision in canMakeKTurn deliberately still uses the vehicle's true radius)
+    local baseTurningRadius = AIUtil.getTurningRadius(self.vehicle)
+    self.turningRadius = AIUtil.getFrontMountedTurnRadius(baseTurningRadius,
+            turnContext and turnContext.frontMarkerDistance)
+    if self.turningRadius ~= baseTurningRadius then
+        CpUtil.debugVehicle(CpDebug.DBG_TURN, self.vehicle,
+                'Front-mounted tool (front marker %.1f m): widening turn radius %.1f -> %.1f',
+                turnContext.frontMarkerDistance, baseTurningRadius, self.turningRadius)
+    end
     ---@type PurePursuitController
     self.ppc = ppc
     self.workWidth = workWidth
