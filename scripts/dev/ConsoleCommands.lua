@@ -21,6 +21,7 @@ CpConsoleCommands.commands = {
 	{ 'cpFreeze', 'Freeze the CP driver', 'cpFreeze' },
 	{ 'cpUnfreeze', 'Unfreeze the CP driver', 'cpUnfreeze' },
 	{ 'cpStopAll', 'Stops all cp drivers', 'cpStopAll' },
+	{ 'cpResetVehicle', 'Force-recover the current vehicle when an AD<->CP handoff wedged it (stops AD+CP, frees manual control)', 'cpResetVehicle' },
 	{ 'cpRaiseAIEvent', 'vehicle/fieldworkerEvent AIImplementEvent', 'cpRaiseAIEvent'},
 	{ 'cpRaiseStateChange', 'VehicleStateChange.*', 'cpRaiseStateChange'}
 }
@@ -255,6 +256,49 @@ function CpConsoleCommands:cpStopAll()
 			vehicle:stopCurrentAIJob(AIMessageErrorUnknown.new())
 		end
 	end
+end
+
+--- Force-recover the CURRENT vehicle when an AutoDrive <-> Courseplay handoff got tripped
+--- and left it unresponsive (won't drive on its own, can't even be driven manually). The
+--- usual cause: AutoDrive's stateModule stays active (so getIsVehicleControlledByPlayer
+--- returns false) while no driver is actually running. This stops both mods and frees the
+--- vehicle. Everything is defensive/pcall-wrapped and only calls methods on the vehicle,
+--- so it is safe whether or not AutoDrive is installed and never crashes the game.
+function CpConsoleCommands:cpResetVehicle()
+	local vehicle = CpUtil.getCurrentVehicle()
+	if not vehicle then
+		return 'No current vehicle - enter/select the wedged vehicle first.'
+	end
+	local done = {}
+	-- 1) AutoDrive: stop it, but first clear the "start helper" flag so stopAutoDrive() does
+	--    not bounce straight back into the failing pass-to-CP handoff (Specialization.lua ~1266).
+	if vehicle.ad and vehicle.stopAutoDrive then
+		local ok, err = pcall(function()
+			if vehicle.ad.stateModule and vehicle.ad.stateModule.setStartHelper then
+				vehicle.ad.stateModule:setStartHelper(false)
+				vehicle.ad.isStoppingWithError = true
+			end
+			vehicle:stopAutoDrive()
+			if vehicle.ad.stateModule then
+				vehicle.ad.isStoppingWithError = false
+			end
+		end)
+		table.insert(done, ok and 'AutoDrive stopped' or ('AutoDrive stop errored: ' .. tostring(err)))
+	end
+	-- 2) Courseplay / Giants AI job: a clean stop ends the job and releases the helper.
+	if vehicle.getIsAIActive and vehicle:getIsAIActive() and vehicle.stopCurrentAIJob then
+		local ok, err = pcall(function()
+			vehicle:stopCurrentAIJob(AIMessageErrorUnknown.new())
+		end)
+		table.insert(done, ok and 'AI job stopped' or ('AI job stop errored: ' .. tostring(err)))
+	end
+	-- 3) Belt-and-suspenders: clear the forced-active flag that keeps the game from handing
+	--    control back to the player.
+	vehicle.forceIsActive = false
+	if #done == 0 then
+		return 'cpResetVehicle: nothing was active; cleared forceIsActive.'
+	end
+	return 'cpResetVehicle: ' .. table.concat(done, '; ') .. '; cleared forceIsActive.'
 end
 
 function CpConsoleCommands:cpRaiseAIEvent(vehicleEvent, implementEvent)
