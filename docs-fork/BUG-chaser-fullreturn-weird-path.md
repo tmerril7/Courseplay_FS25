@@ -1,6 +1,9 @@
 # Bug (note, look later): chaser takes a weird/near-stuck path back when full
 
-**Status:** OPEN — noted 2026-07-12 while testing chopper auto-unload. Low priority.
+**Status:** ADDRESSED 2026-07-19 by FEATURE-fast-getaway.md — the full chaser now skips
+the drive-back-to-start entirely when AutoDrive will take over, and drives a full-speed
+getaway course to the AD network instead. The drive-back path remains only as fallback
+(no AD, wrong AD mode, network too far, pathfinding failed). Original notes below.
 
 ## Symptom (Travis, observed in-game)
 When the chaser trailer filled up, instead of a sensible route it took a **weird path

@@ -106,6 +106,12 @@ AIDriveStrategyUnloadCombine.unloadTargetOffset = 1.5
 --- Offset to apply at the goal marker, so we don't crash with an empty unloader waiting there with the same position.
 AIDriveStrategyUnloadCombine.invertedGoalPositionOffset = -4.5
 
+--- Full-trailer getaway to the AutoDrive network: when already this close to the network, skip pathfinding
+--- and hand off on the spot (AD starts its mode from anywhere within 30 m of the network without replanning)
+AIDriveStrategyUnloadCombine.getawayHandoffOnTheSpotDistance = 20
+--- Don't attempt a getaway course when the network entry is further than this, use the start position instead
+AIDriveStrategyUnloadCombine.maxGetawayPathfindingDistance = 500
+
 --- Field unload constants
 AIDriveStrategyUnloadCombine.siloAreaOffsetFieldUnload = 2
 AIDriveStrategyUnloadCombine.unloadCourseLengthFieldUnload = 50
@@ -145,6 +151,7 @@ AIDriveStrategyUnloadCombine.myStates = {
     MOVING_AWAY_FROM_OTHER_VEHICLE = { vehicle = nil, denyBackupRequest = true }, -- moving until we have enough space between us and an other vehicle
     WAITING_FOR_MANEUVERING_COMBINE = {},
     DRIVING_BACK_TO_START_POSITION_WHEN_FULL = {}, -- Drives to the start position with a trailer attached and gives control to giants or AD there.
+    DRIVING_TO_GETAWAY_WHEN_FULL = {}, -- Full trailer: fast exit course to the AutoDrive network entry, hands control to AD there.
     HANDLE_CHOPPER_180_TURN = { reversing = false, denyBackupRequest = true },
     HANDLE_CHOPPER_HEADLAND_TURN = { reversing = false, denyBackupRequest = true },
     FOLLOW_CHOPPER_THROUGH_TURN = {},
@@ -234,6 +241,9 @@ function AIDriveStrategyUnloadCombine:delete()
     end
     if self.invertedStartPositionMarkerNode then
         CpUtil.destroyNode(self.invertedStartPositionMarkerNode)
+    end
+    if self.getawayTargetNode then
+        CpUtil.destroyNode(self.getawayTargetNode)
     end
 
     self:releaseCombine()
@@ -494,7 +504,10 @@ function AIDriveStrategyUnloadCombine:getDriveData(dt, vX, vY, vZ)
         self:makeRoomForCombineTurningOnHeadland()
 
     elseif self.state == self.states.MOVING_BACK_WITH_TRAILER_FULL then
-        self:setMaxSpeed(self.settings.reverseSpeed:getValue())
+        -- clear the harvester briskly so a staged follower can take over the pipe sooner:
+        -- double the reverse speed, capped at 12 km/h, but never below the user's setting
+        local reverseSpeed = self.settings.reverseSpeed:getValue()
+        self:setMaxSpeed(math.min(2 * reverseSpeed, math.max(reverseSpeed, 12)))
         -- drive back to have some room for the pathfinder
         local _, dx, dz = self:getDistanceFromCombine(self.state.properties.vehicle)
         -- drive back more if we are close to the harvester
@@ -530,6 +543,9 @@ function AIDriveStrategyUnloadCombine:getDriveData(dt, vX, vY, vZ)
         self:moveAwayFromUnloadTrailer()
     elseif self.state == self.states.DRIVING_BACK_TO_START_POSITION_WHEN_FULL then
         self:setMaxSpeed(self:getFieldSpeed())
+    elseif self.state == self.states.DRIVING_TO_GETAWAY_WHEN_FULL then
+        -- full throttle, the only goal is to get off the field and onto the road quickly
+        self:setMaxSpeed(self.vehicle:getCruiseControlMaxSpeed())
         ---------------------------------------------
         --- Unloading on the field
         ---------------------------------------------
@@ -1057,6 +1073,9 @@ function AIDriveStrategyUnloadCombine:onLastWaypointPassed()
     elseif self.state == self.states.DRIVING_BACK_TO_START_POSITION_WHEN_FULL then
         self:debug('Inverted goal position reached, so give control back to the job.')
         self:onTrailerFull()
+    elseif self.state == self.states.DRIVING_TO_GETAWAY_WHEN_FULL then
+        self:debug('Getaway handoff point at the AutoDrive network reached, giving control to AD.')
+        self:onTrailerFull()
         ---------------------------------------------
         --- Self unload
         ---------------------------------------------
@@ -1376,7 +1395,10 @@ function AIDriveStrategyUnloadCombine:startUnloadingTrailers()
         end
     else
         --- Trailer attached
-        if self.invertedStartPositionMarkerNode then
+        if self:startGetawayToAutoDrive() then
+            --- Fast exit: full speed to the AutoDrive network entry on AD's route to the unload
+            --- destination, AD takes over there instead of at the start position.
+        elseif self.invertedStartPositionMarkerNode then
             --- The start position is valid, so drive in there before releasing and giving control to giants or AD.
             self:debug('Trailer is full and a valid start position is set, so drive there before AD or giants can take over.')
             self:startPathfindingToInvertedGoalPositionMarker()
@@ -2856,6 +2878,132 @@ function AIDriveStrategyUnloadCombine:onPathfindingDoneToInvertedGoalPositionMar
         self:startCourse(course, 1)
     else
         self:debug("Could not find a path to the start position marker, pass over to the job!")
+        self:onTrailerFull()
+    end
+end
+
+-----------------------------------------------------------------------------------------------------------------------
+--- Full-trailer getaway: instead of driving back to the start position, find the on-graph route AutoDrive
+--- will drive to the unload destination and head at full speed for its first waypoint. The CP job ends there
+--- and AD, taking over within 30 m of its network, continues to the unload destination without replanning.
+-----------------------------------------------------------------------------------------------------------------------
+
+--- All the AutoDrive queries, pcall-protected. Mirrors the takeover gates of AD's handleCPFieldWorker(),
+--- so we never drive to the network when AD would refuse to take over there.
+---@return table|nil {x, z, yRot, distance} goal pose on the AD network, nil when no getaway is possible
+function AIDriveStrategyUnloadCombine:findAutoDriveGetawayTarget()
+    local ok, target = pcall(function()
+        local autoDrive = FS25_AutoDrive
+        if not (autoDrive and autoDrive.AutoDrive and autoDrive.ADGraphManager and autoDrive.ADStateModule) then
+            return nil
+        end
+        local ad = self.vehicle.ad
+        if not (ad and ad.stateModule) or ad.stateModule:isActive() then
+            return nil
+        end
+        if not ad.stateModule:getStartHelper()
+                or ad.stateModule:getUsedHelper() ~= autoDrive.ADStateModule.HELPER_CP then
+            return nil
+        end
+        local modeAllowed, mode = false, ad.stateModule:getMode()
+        for _, allowed in pairs(autoDrive.AutoDrive.modesToStartFromCP) do
+            modeAllowed = modeAllowed or allowed == mode
+        end
+        if not modeAllowed then
+            return nil
+        end
+        local destinationWpId = ad.stateModule:getSecondWayPoint()
+        if not destinationWpId or destinationWpId < 1 then
+            return nil
+        end
+        local closestWpId, distance = self.vehicle:getClosestWayPoint()
+        if not closestWpId or closestWpId < 1 then
+            return nil
+        end
+        local route = autoDrive.ADGraphManager:pathFromTo(closestWpId, destinationWpId)
+        if not route or #route < 1 then
+            return nil
+        end
+        local yRot
+        if #route > 1 then
+            yRot = MathUtil.getYRotationFromDirection(route[2].x - route[1].x, route[2].z - route[1].z)
+        else
+            local x, _, z = getWorldTranslation(self.vehicle.rootNode)
+            yRot = MathUtil.getYRotationFromDirection(route[1].x - x, route[1].z - z)
+        end
+        return { x = route[1].x, z = route[1].z, yRot = yRot, distance = distance }
+    end)
+    if not ok then
+        self:debug('Getaway: querying AutoDrive failed (%s)', tostring(target))
+        return nil
+    end
+    return target
+end
+
+--- Try the fast exit to the AutoDrive network.
+---@return boolean true when the getaway is on (pathfinding started or handed off on the spot)
+function AIDriveStrategyUnloadCombine:startGetawayToAutoDrive()
+    if self.useGiantsUnload then
+        return false
+    end
+    local target = self:findAutoDriveGetawayTarget()
+    if not target then
+        return false
+    end
+    if target.distance <= self.getawayHandoffOnTheSpotDistance then
+        self:debug('Getaway: already %.0f m from the AutoDrive network, handing off on the spot.', target.distance)
+        self:onTrailerFull()
+        return true
+    end
+    if target.distance > self.maxGetawayPathfindingDistance then
+        self:debug('Getaway: AutoDrive network is %.0f m away, too far, using the start position instead.', target.distance)
+        return false
+    end
+    self:debug('Getaway: full, driving to the AutoDrive network entry %.0f m away.', target.distance)
+    if self.getawayTargetNode then
+        CpUtil.destroyNode(self.getawayTargetNode)
+    end
+    self.getawayTargetNode = CpUtil.createNode('AD getaway target', target.x, target.z, target.yRot)
+    self:setNewState(self.states.WAITING_FOR_PATHFINDER)
+    local context = PathfinderContext(self.vehicle)
+    context:maxFruitPercent(self:getMaxFruitPercent()):offFieldPenalty(PathfinderContext.defaultOffFieldPenalty)
+    context:useFieldNum(CpFieldUtil.getFieldNumUnderVehicle(self.vehicle)):allowReverse(self:getAllowReversePathfinding())
+    context:maxIterations(PathfinderUtil.getMaxIterationsForFieldPolygon(self.vehicle:cpGetFieldPolygon()))
+    self.pathfinderController:registerListeners(self, self.onPathfindingDoneToGetaway,
+            self.onPathfindingFailedToGetaway, self.onPathfindingObstacleAtStart)
+    -- stop short of the network waypoint so we end aligned on the approach, not parked on the road
+    self.pathfinderController:findPathToNode(context, self.getawayTargetNode,
+            0, -1.5 * AIUtil.getLength(self.vehicle), 3)
+    return true
+end
+
+function AIDriveStrategyUnloadCombine:onPathfindingDoneToGetaway(controller, success, course, goalNodeInvalid)
+    if success and self.state == self.states.WAITING_FOR_PATHFINDER then
+        self:debug('Getaway course found, driving to the AutoDrive network at full speed.')
+        self:setNewState(self.states.DRIVING_TO_GETAWAY_WHEN_FULL)
+        self:startCourse(course, 1)
+    else
+        self:debug('No getaway course found, falling back to the start position.')
+        self:startLegacyFullExit()
+    end
+end
+
+--- Getaway pathfinding failed even after the retries relaxed the penalties: fall back to the
+--- pre-getaway exit instead of stopping the job.
+function AIDriveStrategyUnloadCombine:onPathfindingFailedToGetaway(...)
+    self:debug('Pathfinding to the getaway target failed.')
+    self:onPathfindingFailed(
+            function()
+                self:startLegacyFullExit()
+            end, ...)
+end
+
+--- The pre-getaway exit: drive back to the (inverted) start position when there is one, otherwise
+--- hand off to AD/Giants right here.
+function AIDriveStrategyUnloadCombine:startLegacyFullExit()
+    if self.invertedStartPositionMarkerNode then
+        self:startPathfindingToInvertedGoalPositionMarker()
+    else
         self:onTrailerFull()
     end
 end
