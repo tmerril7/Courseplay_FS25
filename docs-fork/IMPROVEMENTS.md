@@ -3,6 +3,12 @@
 > Candidate directions for `tmerril7/Courseplay_FS25`. Written 2026-07-11.
 > Fork is in sync with upstream v8.1.0.3.
 
+## ⏳ Pending in-game verification
+- **Fast getaway** (commit a923fa46, 2026-07-19): full chaser exits to the AD network at
+  full speed instead of driving back to start. Zip built & installed to the mods folder;
+  Travis still needs to test. Checklist in FEATURE-fast-getaway.md (watch full-speed
+  cornering with a full trailer, and the field-boundary crossing point).
+
 ## Context that shapes strategy
 - **Upstream has stalled**: 27 commits/mo (Dec 2025) → ~2-3/mo now. Open issue
   #1290 "Will there ever be new updates to CP?". 157 open issues. This is a
