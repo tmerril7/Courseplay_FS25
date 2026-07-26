@@ -346,11 +346,9 @@ function AIDriveStrategyUnloadCombine:ignoreProximityObject(object, vehicle, mov
             -- final alignment loop of the approach to a straight-unload-only harvester: this may
             -- swing across the harvester's path. If we stop for proximity there, our nose stays in
             -- its path and both machines freeze (it stops for us too). Keep driving and complete
-            -- the loop until we are parallel; ending up ahead of the harvester is fine.
-            (self.state == self.states.DRIVING_TO_MOVING_COMBINE and vehicle == self.combineToUnload and
-                    self.combineToUnload:getCpDriveStrategy():isStraightUnloadOnly() and
-                    self.course ~= nil and
-                    self.course:getDistanceToLastWaypoint(self.course:getCurrentWaypointIx()) < 40)
+            -- the loop until we are parallel (we hold the harvester meanwhile, see
+            -- driveToMovingCombine); ending up ahead of the harvester is fine.
+            (vehicle == self.combineToUnload and self:isFinishingApproachToStraightUnloadHarvester())
 end
 
 function AIDriveStrategyUnloadCombine:checkCollisionWarning()
@@ -2342,6 +2340,18 @@ end
 ------------------------------------------------------------------------------------------------------------------------
 -- Drive to moving combine
 ------------------------------------------------------------------------------------------------------------------------
+--- Are we in the final stretch of the approach course to a straight-unload-only harvester? There the
+--- alignment loop may swing across the harvester's path: we ignore the harvester in our proximity
+--- sensor (see ignoreProximityObject) and hold it instead, so we complete the loop and get parallel
+--- while it waits, rather than both machines freezing nose to nose.
+function AIDriveStrategyUnloadCombine:isFinishingApproachToStraightUnloadHarvester()
+    return self.state == self.states.DRIVING_TO_MOVING_COMBINE and
+            self.combineToUnload ~= nil and
+            self.combineToUnload:getCpDriveStrategy():isStraightUnloadOnly() and
+            self.course ~= nil and
+            self.course:getDistanceToLastWaypoint(self.course:getCurrentWaypointIx()) < 40
+end
+
 function AIDriveStrategyUnloadCombine:driveToMovingCombine()
 
     self:checkForCombineProximity()
@@ -2349,6 +2359,12 @@ function AIDriveStrategyUnloadCombine:driveToMovingCombine()
     self:setFieldSpeed()
 
     self:checkForCombineTurnArea()
+
+    if self:isFinishingApproachToStraightUnloadHarvester() and
+            self:getDistanceToVehicle(self.combineToUnload) < 30 then
+        -- have the harvester wait while we finish the alignment loop close to (maybe across) its path
+        self.combineToUnload:getCpDriveStrategy():hold(2000)
+    end
 
     -- stop when too close to a combine not ready to unload (wait until it is done with turning for example)
     if self:isWithinSafeManeuveringDistance(self.combineToUnload) and self.combineToUnload:getCpDriveStrategy():isManeuvering() then
@@ -2711,6 +2727,12 @@ function AIDriveStrategyUnloadCombine:onBlockingVehicle(blockingVehicle, isBack)
         self:debug('%s has been blocking us for a while, ignoring as either not active or in the back', CpUtil.getName(blockingVehicle))
         return
     end
+    if blockingVehicle == self.combineToUnload and self:isFinishingApproachToStraightUnloadHarvester() then
+        -- we are completing the alignment loop across its path and holding it meanwhile: aborting
+        -- the approach now would leave us stranded on its path, carry on instead
+        self:debug('%s reports us blocking, but we are finishing our approach to it, carrying on', CpUtil.getName(blockingVehicle))
+        return
+    end
     if self.state ~= self.states.MOVING_AWAY_FROM_OTHER_VEHICLE and
             self.state ~= self.states.BACKING_UP_FOR_REVERSING_COMBINE and
             self.state ~= self.states.FOLLOW_CHOPPER_THROUGH_TURN and
@@ -2755,6 +2777,17 @@ function AIDriveStrategyUnloadCombine:onBlockingVehicle(blockingVehicle, isBack)
                         from + self.maxDistanceWhenMovingOutOfWay, 5, false)
                 -- drive the entire course, making sure the trailer is also out of way
                 self.state.properties.dx = xOffset
+            elseif blockingVehicle:getCpDriveStrategy().isStraightUnloadOnly and
+                    blockingVehicle:getCpDriveStrategy():isStraightUnloadOnly() then
+                -- angled mid-maneuver in front of a straight-unload-only harvester: driving straight
+                -- ahead can keep us on its path indefinitely, so steer onto a lane parallel to it
+                -- with a lateral offset, like the same direction case
+                local _, _, from = localToLocal(Markers.getFrontMarkerNode(self.vehicle), blockingVehicle:getAIDirectionNode(), 0, 0, 0)
+                self:debug('%s is a straight-unload-only CP harvester, angled, steering onto a parallel lane from %.1f with xOffset %.1f',
+                        CpUtil.getName(blockingVehicle), from, xOffset)
+                course = Course.createFromNode(self.vehicle, blockingVehicle:getAIDirectionNode(), xOffset, from,
+                        from + self.maxDistanceWhenMovingOutOfWay, 5, false)
+                self.state.properties.dx = xOffset
             else
                 self:debug('%s is a CP combine, not head on, not same direction', CpUtil.getName(blockingVehicle))
                 self.state.properties.dx = nil
@@ -2797,7 +2830,9 @@ function AIDriveStrategyUnloadCombine:requestToMoveForward(requestingVehicle)
 end
 
 function AIDriveStrategyUnloadCombine:moveAwayFromOtherVehicle()
-    self:setMaxSpeed(self.settings.reverseSpeed:getValue())
+    -- crawling at reverse speed is fine when backing up, but when the escape course leads forward
+    -- (like out of the path of a following harvester), get out of the way at field speed
+    self:setMaxSpeed(self.ppc:isReversing() and self.settings.reverseSpeed:getValue() or self:getFieldSpeed())
     local driveStrategy = self.state.properties.vehicle.getCpDriveStrategy and self.state.properties.vehicle:getCpDriveStrategy()
     -- Are we still close to the vehicle we are blocking?
     if driveStrategy and driveStrategy:isVehicleInProximity(self.vehicle) then

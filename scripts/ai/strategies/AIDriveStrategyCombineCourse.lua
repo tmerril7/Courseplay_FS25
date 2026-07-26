@@ -34,6 +34,13 @@ AIDriveStrategyCombineCourse.straightUnloadHoldOffDistance = 18
 -- call the unloader at this fill percentage already (if lower than the user setting): valid unload
 -- windows (straight section + pipe not in fruit) are scarce, use them when they come up
 AIDriveStrategyCombineCourse.straightUnloadCallPercent = 30
+-- never set up a meeting point closer than this ahead of us: the unloader approaches with a loop to
+-- line up parallel and needs to complete that loop before we arrive, otherwise it ends up crossing
+-- right in front of us
+AIDriveStrategyCombineCourse.straightUnloadMinMeetDistance = 50
+-- and call the unloader this many seconds before we expect to be at the meeting point (default is 5):
+-- it is fine (desired, even) if it arrives well before us, lines up parallel in the lane and waits
+AIDriveStrategyCombineCourse.straightUnloadCallEteMargin = 20
 -- when fill level is above this threshold, don't start the next row if the pipe would be
 -- in the fruit
 AIDriveStrategyCombineCourse.waitForUnloadAtEndOfRowFillLevelThreshold = 95
@@ -980,6 +987,11 @@ function AIDriveStrategyCombineCourse:callUnloaderWhenNeeded()
                         dToTentativeRendezvousWaypoint)
                 tentativeRendezvousWaypointIx = self.course:getNextWaypointIxWithinDistance(
                         self.course:getCurrentWaypointIx(), dToTentativeRendezvousWaypoint)
+                if tentativeRendezvousWaypointIx and self:isStraightUnloadOnly() then
+                    -- make sure the moved meeting point still observes the straight-unload
+                    -- constraints (not near a row end, pipe not in fruit, ...)
+                    tentativeRendezvousWaypointIx = self:findBestWaypointToUnload(tentativeRendezvousWaypointIx, false)
+                end
                 if tentativeRendezvousWaypointIx then
                     bestUnloader, bestEte = self:findUnloader(nil, self.course:getWaypoint(tentativeRendezvousWaypointIx))
                     if bestUnloader then
@@ -988,7 +1000,8 @@ function AIDriveStrategyCombineCourse:callUnloaderWhenNeeded()
                 else
                     self:debug('callUnloaderWhenNeeded: still can\'t find a good waypoint to meet the unloader')
                 end
-            elseif bestEte + 5 > myEte then
+            elseif bestEte + (self:isStraightUnloadOnly() and
+                    AIDriveStrategyCombineCourse.straightUnloadCallEteMargin or 5) > myEte then
                 -- do not call too early (like minutes before we get there), only when it needs at least as
                 -- much time to get there as the combine (-5 seconds)
                 self:callUnloader(bestUnloader, tentativeRendezvousWaypointIx, bestEte)
@@ -1206,6 +1219,15 @@ end
 --- to unload. Now make sure that this location is not around a turn or the pipe isn't in the fruit by
 --- trying to move it up or down a bit. If that's not possible, just leave it and see what happens :)
 function AIDriveStrategyCombineCourse:findBestWaypointToUnloadOnUpDownRows(ix, isPipeInFruitAllowed)
+    if self:isStraightUnloadOnly() then
+        -- give the unloader room to swing in and line up parallel before we get there
+        local minMeetIx = self.course:getNextWaypointIxWithinDistance(self.course:getCurrentWaypointIx(),
+                AIDriveStrategyCombineCourse.straightUnloadMinMeetDistance)
+        if minMeetIx and minMeetIx > ix then
+            self:debug('Straight unload only: meeting point %d too close to us, moving up to %d', ix, minMeetIx)
+            ix = minMeetIx
+        end
+    end
     local dToNextTurn = self.course:getDistanceToNextTurn(ix) or math.huge
     local lRow, ixAtRowStart = self.course:getRowLength(ix)
     local pipeInFruit = self:isPipeInFruitAt(ix)

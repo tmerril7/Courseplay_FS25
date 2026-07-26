@@ -115,6 +115,31 @@ Two related failures when a CP chaser serves the Oxbo EPD 540E pea harvester:
 - New translation key `CP_job_peaHarvesterUnload` in MasterTranslations + all 27 translation files
   (en text everywhere, de translated — matches what the translations CI would generate).
 
+## Round 4 (2026-07-26, from log.txt after a near-collision + jam)
+
+Log showed the exact chain: with the bunker already over the eager 30% call threshold,
+`callUnloaderWhenNeeded` computed **my ETE 0.0 s** — the meeting point degenerated to the
+harvester's current position and the "too close" fallback pushed it only 25 m ahead. The chaser's
+alignment loop crossed right in front of the moving harvester (braked 8.4→0, stopped at 1.5 m),
+after 7 s of blocking the harvester's `requestToMoveOutOfWay` ABORTED the chaser's approach, and
+the escape course ("not head on, not same direction" → straight ahead) drove the chaser along the
+harvester's own path at reverse speed, "Still in proximity" for 22 s, rendezvous cancelled, repeat.
+
+Fixes (straight-unload-only scoped unless noted):
+1. `straightUnloadMinMeetDistance=50` — `findBestWaypointToUnloadOnUpDownRows` never returns a
+   meet closer than 50 m ahead of the harvester; the ETE-pushed meet in `callUnloaderWhenNeeded`
+   is re-validated through `findBestWaypointToUnload` (vanilla intentionally skips that).
+2. `straightUnloadCallEteMargin=20` (vs vanilla 5) — call the unloader up to 20 s before the
+   harvester's own ETE: arriving early, parking parallel in the lane and waiting is desired.
+3. `isFinishingApproachToStraightUnloadHarvester()` (last 40 m of DRIVING_TO_MOVING_COMBINE):
+   shared window for the proximity-ignore, plus NEW: `hold(2000)` the harvester while within
+   30 m so it waits for the loop to finish, and `onBlockingVehicle` declines the abort in this
+   window (we're already resolving it).
+4. Escape courses: when angled ("not head on, not same direction") in front of a straight-only
+   harvester, `onBlockingVehicle` now builds the parallel-with-xOffset course instead of straight
+   ahead (straight ahead = down the harvester's path forever). `moveAwayFromOtherVehicle` drives
+   forward escapes at field speed instead of reverse speed (general change, all unloaders).
+
 ## Tuning without rebuild
 
 `unloadOffsetX/Z` can be hot-tuned in-game: put an override in
