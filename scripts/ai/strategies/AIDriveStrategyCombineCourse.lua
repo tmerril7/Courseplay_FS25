@@ -2115,6 +2115,13 @@ function AIDriveStrategyCombineCourse:isSafeToUnloadOnStraight()
     if self:isTurning() then
         return false
     end
+    if self.state == self.states.UNLOADING_ON_FIELD then
+        -- deliberately stopped (like waiting for unload before starting the next row) or maneuvering
+        -- to be unloaded right here: we are not driving the course, so there is no turn to conflict
+        -- with -- the break off distance only applies to a harvester on the move. Without this, a
+        -- harvester stopping full near the row end can never be unloaded (deadlock).
+        return true
+    end
     if not self.course or self.course:isTemporary() then
         return false
     end

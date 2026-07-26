@@ -140,6 +140,17 @@ Fixes (straight-unload-only scoped unless noted):
    ahead (straight ahead = down the harvester's path forever). `moveAwayFromOtherVehicle` drives
    forward escapes at field speed instead of reverse speed (general change, all unloaders).
 
+## Round 5 (2026-07-26, stall diagnosed from log)
+
+Deadlock: harvester fills to ~95% in the unbuffered last 35 m of the row (the break off makes this
+COMMON), does the vanilla stop-at-row-end-and-wait (`WAITING_FOR_UNLOAD_BEFORE_STARTING_NEXT_ROW`),
+calls the chaser — which arrives and is rejected: `isSafeToUnloadOnStraight` said "row end within
+35 m" even though the harvester is STOPPED there waiting. Chaser goes IDLE 1.2 m from the target;
+re-calls then fail ("no pathfinding needed" + same broken readiness check) while the failed call
+keeps the chaser registered, so the harvester logs "already has an unloader assigned" forever.
+FIX: `isSafeToUnloadOnStraight` returns true whenever the harvester is in `UNLOADING_ON_FIELD`
+(stopped/maneuvering to be unloaded in place) — the break off distance only applies on the move.
+
 ## Tuning without rebuild
 
 `unloadOffsetX/Z` can be hot-tuned in-game: put an override in
