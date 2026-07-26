@@ -524,9 +524,9 @@ function AIDriveStrategyUnloadCombine:getDriveData(dt, vX, vY, vZ)
             self:debugSparse('Holding combine while backing up')
             self.combineToUnload:getCpDriveStrategy():hold(1000)
         end
-        -- drive back until the combine is in front of us
+        -- drive back until the combine is in front of us (with an extra margin if requested)
         local _, _, dz = self:getDistanceFromCombine(self.state.properties.vehicle)
-        if dz > 0 then
+        if dz > (self.state.properties.dzExit or 0) then
             self:debug('Stop backing up')
             self:startWaitingForSomethingToDo()
         end
@@ -2269,8 +2269,16 @@ function AIDriveStrategyUnloadCombine:changeToUnloadWhenTrailerFull()
         else
             self:debug('... moving back a little in case AD wants to take over')
         end
+        local harvester = self.combineToUnload
         self:releaseCombine()
-        self:startMovingBackFromCombine(self.states.MOVING_BACK_WITH_TRAILER_FULL, self.combineJustUnloaded)
+        if harvester and self:anotherUnloaderIsStagingBehind(harvester) then
+            -- a follower is tucked in right behind us: reversing would drive into it and stall the
+            -- handover. No need to clear the harvester either, just peel off forward and go.
+            self:debug('... follower staged behind us, skipping the reverse, peeling off forward')
+            self:startUnloadingTrailers()
+        else
+            self:startMovingBackFromCombine(self.states.MOVING_BACK_WITH_TRAILER_FULL, self.combineJustUnloaded)
+        end
         return true
     end
     return false
@@ -2463,20 +2471,34 @@ function AIDriveStrategyUnloadCombine:unloadMovingCombine()
 
     if not combineStrategy:isTurning() and not combineStrategy:isSafeToUnloadOnStraight() then
         -- straight-unload-only harvester (like a pea harvester): its conveyor only deploys with the
-        -- trailer in position and it can't discharge through turns. Break off before the row end: ease
-        -- off so we fall behind and the conveyor retracts before the harvester starts the turn. Once it
-        -- turns (or we drop out of alignment), the normal recovery below re-stages us for the next straight.
-        self:debugSparse('Straight unload only harvester close to row end, easing off to fall behind')
-        self:setMaxSpeed(math.max(0, self.combineToUnload:getLastSpeed() - 5))
+        -- trailer in position and it can't discharge through turns. Break off before the row end: brake
+        -- hard enough to actually fall behind (the harvester may itself be slowing down for the turn)
+        -- so the conveyor retracts and we are out of its turn path before it starts turning.
+        local dToTurn = combineStrategy:getDistanceToNextTurnStart()
+        if dToTurn < AIDriveStrategyCombineCourse.straightUnloadHoldOffDistance then
+            self:debugSparse('Straight unload only harvester %.0f m from the row end, stopping', dToTurn)
+            self:setMaxSpeed(0)
+        else
+            self:debugSparse('Straight unload only harvester close to row end, easing off to fall behind')
+            self:setMaxSpeed(math.max(0, self.combineToUnload:getLastSpeed() - 8))
+        end
     end
 
     if combineStrategy:isTurning() then
         if not combineStrategy:isFinishingRow() then
             if combineStrategy:isStraightUnloadOnly() then
-                -- a straight-unload-only harvester won't hold in the turn for us, give it room to
-                -- turn and re-stage for the next straight section
-                self:debug('Straight unload only harvester turning, moving out of the way')
-                self:onUnloadingMovingCombineFinished(combineStrategy)
+                if self:getAllTrailersFull(self.settings.fullThreshold:getValue()) then
+                    -- enough in the trailer to leave now, the peel off / moving back logic there
+                    -- handles a staged follower
+                    self:debug('Straight unload only harvester turning and our trailer is full enough, leaving')
+                    self:onUnloadingMovingCombineFinished(combineStrategy)
+                else
+                    -- a straight-unload-only harvester won't hold in the turn for us: back well clear
+                    -- of its turn path (extra dz margin), then re-stage for the next straight
+                    self:debug('Straight unload only harvester turning, backing clear of its turn path')
+                    self:startMovingBackFromCombine(self.states.MOVING_BACK, self.combineToUnload,
+                            false, 25, 10)
+                end
                 return gx, gz
             end
             -- harvester is now about the start the turn after it finished the row
@@ -2542,8 +2564,13 @@ function AIDriveStrategyUnloadCombine:onUnloadingMovingCombineFinished(combineSt
         -- make some room for the pathfinder, as the trailer may not be full but has reached the threshold,
         --, which case is not caught in changeToUnloadWhenTrailerFull() as we want to keep unloading as long as
         -- we can
-        self:debug('combine empty and moving forward but we want to leave, so move back a bit')
-        self:startMovingBackFromCombine(self.states.MOVING_BACK_WITH_TRAILER_FULL, self.combineToUnload)
+        if self:anotherUnloaderIsStagingBehind(self.combineToUnload) then
+            self:debug('combine empty and we want to leave; follower staged behind us, peeling off forward')
+            self:startUnloadingTrailers()
+        else
+            self:debug('combine empty and moving forward but we want to leave, so move back a bit')
+            self:startMovingBackFromCombine(self.states.MOVING_BACK_WITH_TRAILER_FULL, self.combineToUnload)
+        end
         return
     else
         self:debug('combine empty and moving forward')
@@ -2555,18 +2582,22 @@ end
 ------------------------------------------------------------------------------------------------------------------------
 -- Start moving back from empty combine
 ------------------------------------------------------------------------------------------------------------------------
-function AIDriveStrategyUnloadCombine:startMovingBackFromCombine(newState, combine, holdCombineWhileMovingBack)
+---@param courseLength number|nil length of the reverse course, default 15 m
+---@param dzExit number|nil MOVING_BACK only: stop reversing once the combine is this far ahead of
+--- us (default 0). Use a positive margin to clear the combine's turn path.
+function AIDriveStrategyUnloadCombine:startMovingBackFromCombine(newState, combine, holdCombineWhileMovingBack, courseLength, dzExit)
     if self.unloadTargetType == self.UNLOAD_TYPES.SILO_LOADER then
         --- Finished unloading of silo unloader. Moving back is not needed.
         self:setNewState(self.states.IDLE)
         return
     end
 
-    local reverseCourse = Course.createStraightReverseCourse(self.vehicle, 15)
+    local reverseCourse = Course.createStraightReverseCourse(self.vehicle, courseLength or 15)
     self:startCourse(reverseCourse, 1)
     self:setNewState(newState)
     self.state.properties.vehicle = combine
     self.state.properties.holdCombine = holdCombineWhileMovingBack
+    self.state.properties.dzExit = dzExit
     return
 end
 

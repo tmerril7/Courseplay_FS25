@@ -1,6 +1,30 @@
 # Pea harvester (Oxbo EPD 540E) chaser support — straight-only unload
 
-Date: 2026-07-25. Branch: fork/crash-fixes. Status: implemented, NOT yet in-game verified.
+Date: 2026-07-25. Branch: fork/crash-fixes. Status: round 2 after first in-game test (2026-07-26).
+
+## Round 1 in-game test results (Travis, 2026-07-26)
+
+Worked: display tag switched to "CP: Unload Pea Harvester" while actively serving the Oxbo
+(reverts to "CP: Unload Combine" while idle — expected, it keys on the active target); lane
+approach + on-the-move unloading worked; stopped-full pull-back unload (pipe-in-fruit side) worked.
+
+Problems → round 2 fixes (same file sections as round 1):
+1. First engagement only happened after the harvester stopped full and called — moving rendezvous
+   were being rejected on pipe-in-fruit rows and the call threshold (callUnloaderPercent) was too
+   high for the small 3730 l bunker. FIX: `straightUnloadCallPercent=30` caps the effective call
+   threshold (estimateDistanceUntilFull), and `findNextStraightUnloadRowIx()` rescues rejected/
+   near-row-end rendezvous by scanning up to 3 rows ahead for a fruit-free row long enough
+   (meet at rowStart+4 so the harvester can settle after the turn first).
+2. Break-off didn't create enough separation; the harvester bumped the chaser during the turn.
+   FIX: two-stage break-off (speed−8 outside 18 m of the row end, full stop inside
+   `straightUnloadHoldOffDistance=18`), and at turn start the chaser now reverses 25 m with a
+   +10 m dz exit margin (`startMovingBackFromCombine` grew courseLength/dzExit params,
+   MOVING_BACK honors `dzExit`) instead of the default stop-in-place. If the trailer is above
+   the full threshold it leaves via the normal full-trailer path instead.
+3. (Grass convoy, unrelated to peas) full chaser reversed into the staged follower. FIX: both
+   full-trailer exits (`changeToUnloadWhenTrailerFull`, `onUnloadingMovingCombineFinished`)
+   skip the reverse and peel off forward straight into `startUnloadingTrailers()` (→ fast
+   getaway) when `anotherUnloaderIsStagingBehind()` — solo chasers keep the old reverse.
 
 ## Problem
 

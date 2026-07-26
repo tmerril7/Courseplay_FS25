@@ -29,6 +29,11 @@ AIDriveStrategyCombineCourse.straightUnloadBreakOffDistance = 35
 -- and the course must not bend tighter than this radius within the lookahead distance to count as straight
 AIDriveStrategyCombineCourse.straightUnloadMinRadius = 70
 AIDriveStrategyCombineCourse.straightUnloadLookAheadDistance = 20
+-- within this distance of the row end the breaking off unloader stops completely
+AIDriveStrategyCombineCourse.straightUnloadHoldOffDistance = 18
+-- call the unloader at this fill percentage already (if lower than the user setting): valid unload
+-- windows (straight section + pipe not in fruit) are scarce, use them when they come up
+AIDriveStrategyCombineCourse.straightUnloadCallPercent = 30
 -- when fill level is above this threshold, don't start the next row if the pipe would be
 -- in the fruit
 AIDriveStrategyCombineCourse.waitForUnloadAtEndOfRowFillLevelThreshold = 95
@@ -828,7 +833,13 @@ function AIDriveStrategyCombineCourse:estimateDistanceUntilFull(ix)
     end
     local litersUntilFull = capacity - fillLevel
     local dUntilFull = CpMathUtil.divide(litersUntilFull, self.litersPerMeter)
-    local litersUntilCallUnloader = capacity * self.settings.callUnloaderPercent:getValue() / 100 - fillLevel
+    local callUnloaderPercent = self.settings.callUnloaderPercent:getValue()
+    if self:isStraightUnloadOnly() then
+        -- unload windows are scarce (straight section + pipe not in fruit), so call the unloader
+        -- early and top off whenever there is an opportunity
+        callUnloaderPercent = math.min(callUnloaderPercent, AIDriveStrategyCombineCourse.straightUnloadCallPercent)
+    end
+    local litersUntilCallUnloader = capacity * callUnloaderPercent / 100 - fillLevel
     local dUntilCallUnloader = CpMathUtil.divide(litersUntilCallUnloader, self.litersPerMeter)
     self.waypointIxWhenFull = self.course:getNextWaypointIxWithinDistance(ix, dUntilFull) or self.course:getNumberOfWaypoints()
     local wpDistance
@@ -1246,19 +1257,29 @@ function AIDriveStrategyCombineCourse:findBestWaypointToUnloadOnUpDownRows(ix, i
             dNeededBeforeRowEnd = dNeededBeforeRowEnd + AIDriveStrategyCombineCourse.straightUnloadBreakOffDistance
         end
         if ixAtRowStart and dToNextTurn < dNeededBeforeRowEnd then
-            local nextRowStartIx = self.course:getNextRowStartIx(ix)
-            local lNextRow = self.course:getNextRowLength(ix)
-            if self:isStraightUnloadOnly() and nextRowStartIx and lNextRow and lNextRow > dNeededBeforeRowEnd then
+            local pushedIx = self:isStraightUnloadOnly() and self:findNextStraightUnloadRowIx(ix, dNeededBeforeRowEnd)
+            if pushedIx then
                 -- straight unload only: instead of squeezing the rendezvous in before the turn, meet
-                -- on the next row where there is a full straight ahead of us
-                self:debug('Straight unload only: rendezvous %d too close to row end, moving to next row start at %d',
-                        ix, nextRowStartIx + 2)
-                newWpIx = nextRowStartIx + 2
+                -- on the next suitable row where there is a full straight ahead of us
+                self:debug('Straight unload only: rendezvous %d too close to row end, moving to %d on an upcoming row',
+                        ix, pushedIx)
+                newWpIx = pushedIx
             else
                 local safeIx = self.course:getPreviousWaypointIxWithinDistance(ix,
                         AIDriveStrategyCombineCourse.safeUnloadDistanceBeforeEndOfRow)
                 newWpIx = math.max(ixAtRowStart + 1, safeIx or -1, ix - 4, currentIx)
             end
+        end
+    end
+    if not newWpIx and self:isStraightUnloadOnly() then
+        -- the estimated meeting point was rejected (typically pipe in fruit). Unload windows are
+        -- scarce for straight-unload-only harvesters, so instead of giving up until the estimate
+        -- lands on a good row, look ahead for the next row where the pipe is out of the fruit.
+        newWpIx = self:findNextStraightUnloadRowIx(ix, AIDriveStrategyCombineCourse.safeUnloadDistanceBeforeEndOfRow +
+                AIDriveStrategyCombineCourse.straightUnloadBreakOffDistance)
+        if newWpIx then
+            self:debug('Straight unload only: rejected rendezvous at %d rescued, meeting at %d on an upcoming row',
+                    ix, newWpIx)
         end
     end
     -- no better idea, just use the original estimated, making sure we avoid turn start waypoints
@@ -2088,6 +2109,41 @@ function AIDriveStrategyCombineCourse:isSafeToUnloadOnStraight()
         return false
     end
     return true
+end
+
+--- Distance along the fieldwork course from our current position to the next turn start (row end).
+--- 0 while turning or on a temporary course, math.huge if there is no turn ahead.
+function AIDriveStrategyCombineCourse:getDistanceToNextTurnStart()
+    if self:isTurning() or not self.course or self.course:isTemporary() then
+        return 0
+    end
+    return self.course:getDistanceToNextTurn(self.ppc:getRelevantWaypointIx()) or math.huge
+end
+
+--- For straight-unload-only harvesters: find a waypoint on one of the upcoming rows where an unloader
+--- can meet us: the row must be long enough for the break off distance plus unload runway and the
+--- pipe must not be in the fruit there.
+---@param ix number waypoint index to start looking from
+---@param dNeeded number minimum row length needed
+---@return number|nil waypoint index a few waypoints into the found row, or nil if none found
+function AIDriveStrategyCombineCourse:findNextStraightUnloadRowIx(ix, dNeeded)
+    local fromIx = ix
+    for _ = 1, 3 do
+        local rowStartIx = self.course:getNextRowStartIx(fromIx)
+        local lRow = self.course:getNextRowLength(fromIx)
+        if not rowStartIx or rowStartIx <= fromIx or
+                rowStartIx + 4 > self.course:getNumberOfWaypoints() then
+            return nil
+        end
+        if lRow and lRow > dNeeded and not self:isPipeInFruitAt(rowStartIx + 4) then
+            self:debug('Next straight unload row starts at %d (%.0f m long)', rowStartIx, lRow)
+            -- a few waypoints into the row so the meeting point leaves the harvester room to
+            -- finish the turn and settle on the row first
+            return rowStartIx + 4
+        end
+        fromIx = rowStartIx + 1
+    end
+    return nil
 end
 
 --- Are we ready for an unloader?
