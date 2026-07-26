@@ -26,6 +26,29 @@ Problems → round 2 fixes (same file sections as round 1):
    skip the reverse and peel off forward straight into `startUnloadingTrailers()` (→ fast
    getaway) when `anotherUnloaderIsStagingBehind()` — solo chasers keep the old reverse.
 
+## Round 3 (2026-07-26, second test round feedback)
+
+1. Grass: the follower-gated peel-off wasn't enough (follower can be in DRIVING_TO_STAGE, and a
+   chopper stops immediately anyway when the full chaser leaves — reversing NEVER helps there).
+   FIX: peel off forward whenever the harvester `alwaysNeedsUnloader()` (chopper) OR a follower
+   is staged. Combines with a hopper and no follower still reverse.
+2. Label flickered between pea/combine while the harvester's bunker continually bottomed out
+   during on-the-move unload: `getFillType()` reads UNKNOWN on an empty fill unit. FIX:
+   `getCustomJobDisplayText` latches the last non-UNKNOWN fill type per unloader strategy
+   (`straightUnloadTargetFillType`).
+3. Approach loop-around froze with the tractor's nose in the harvester's path (mutual proximity
+   stop: harvester stops for us, we stop for it → jam until blocking timeout). FIX:
+   `ignoreProximityObject` now ignores the target combine during the last 40 m of the
+   DRIVING_TO_MOVING_COMBINE approach course (straight-unload-only targets only) so the chaser
+   completes the loop until parallel — ending up ahead of the harvester is fine, it pipes out
+   and the chaser picks up the pace alongside.
+4. After unloading a stopped/pulled-back harvester, the chaser reversed (MOVING_BACK) — jams
+   with a pivoting-front-axle (dolly) trailer. FIX: new `startMovingPastCombine()` — forward
+   course parallel to the harvester, offset `width/2 + workWidth/2 + 2` to our side, via the
+   existing MOVING_AWAY_FROM_OTHER_VEHICLE state (runs until laterally clear + out of the
+   harvester's proximity, so its path back into the cut line is free). Straight-unload-only
+   targets only; other combines keep the reverse.
+
 ## Problem
 
 Two related failures when a CP chaser serves the Oxbo EPD 540E pea harvester:

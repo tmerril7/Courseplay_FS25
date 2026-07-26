@@ -342,7 +342,15 @@ function AIDriveStrategyUnloadCombine:ignoreProximityObject(object, vehicle, mov
     return (self.state == self.states.UNLOADING_ON_THE_FIELD and hitTerrain) or
             -- these states handle the proximity by themselves
             (self.state == self.states.UNLOADING_MOVING_COMBINE and vehicle == self.combineToUnload) or
-            (self.state == self.states.HANDLE_CHOPPER_HEADLAND_TURN and vehicle == self.combineToUnload)
+            (self.state == self.states.HANDLE_CHOPPER_HEADLAND_TURN and vehicle == self.combineToUnload) or
+            -- final alignment loop of the approach to a straight-unload-only harvester: this may
+            -- swing across the harvester's path. If we stop for proximity there, our nose stays in
+            -- its path and both machines freeze (it stops for us too). Keep driving and complete
+            -- the loop until we are parallel; ending up ahead of the harvester is fine.
+            (self.state == self.states.DRIVING_TO_MOVING_COMBINE and vehicle == self.combineToUnload and
+                    self.combineToUnload:getCpDriveStrategy():isStraightUnloadOnly() and
+                    self.course ~= nil and
+                    self.course:getDistanceToLastWaypoint(self.course:getCurrentWaypointIx()) < 40)
 end
 
 function AIDriveStrategyUnloadCombine:checkCollisionWarning()
@@ -2271,10 +2279,12 @@ function AIDriveStrategyUnloadCombine:changeToUnloadWhenTrailerFull()
         end
         local harvester = self.combineToUnload
         self:releaseCombine()
-        if harvester and self:anotherUnloaderIsStagingBehind(harvester) then
-            -- a follower is tucked in right behind us: reversing would drive into it and stall the
-            -- handover. No need to clear the harvester either, just peel off forward and go.
-            self:debug('... follower staged behind us, skipping the reverse, peeling off forward')
+        if harvester and (harvester:getCpDriveStrategy():alwaysNeedsUnloader() or
+                self:anotherUnloaderIsStagingBehind(harvester)) then
+            -- A chopper has no hopper: the moment we leave it stops anyway, so reversing to "clear"
+            -- it has no benefit, we are in the way right now and should peel off forward and go.
+            -- Same when a follower is tucked in right behind us: reversing would drive into it.
+            self:debug('... chopper or follower staged behind us, skipping the reverse, peeling off forward')
             self:startUnloadingTrailers()
         else
             self:startMovingBackFromCombine(self.states.MOVING_BACK_WITH_TRAILER_FULL, self.combineJustUnloaded)
@@ -2428,14 +2438,43 @@ function AIDriveStrategyUnloadCombine:unloadStoppedCombine()
                 gx, gz = self:driveBesideCombine()
             end
         else
-            self:debug('finished unloading stopped combine, move back a bit to make room for it to continue')
-            self:startMovingBackFromCombine(self.states.MOVING_BACK, self.combineToUnload, true)
+            if combineDriver.isStraightUnloadOnly and combineDriver:isStraightUnloadOnly() then
+                -- reversing with a pivoting front axle trailer is unreliable, and after a pull-back
+                -- the harvester needs its path back into the cut line cleared anyway: pull forward
+                -- and aside past the harvester instead of backing up
+                self:debug('finished unloading stopped straight-unload-only harvester, pulling forward and aside')
+                self:startMovingPastCombine(self.combineToUnload)
+            else
+                self:debug('finished unloading stopped combine, move back a bit to make room for it to continue')
+                self:startMovingBackFromCombine(self.states.MOVING_BACK, self.combineToUnload, true)
+            end
             self.ppc:setNormalLookaheadDistance()
         end
     else
         gx, gz = self:driveBesideCombine()
     end
     return gx, gz
+end
+
+--- Drive forward on a course parallel to the combine's heading, offset to our side of it, until we
+--- are clear of its proximity (and laterally clear of its work width). Used instead of reversing
+--- after unloading a stopped straight-unload-only harvester: it moves us out of the way faster and
+--- avoids backing up a trailer with a pivoting front axle.
+function AIDriveStrategyUnloadCombine:startMovingPastCombine(combine)
+    local combineStrategy = combine:getCpDriveStrategy()
+    local referenceObject = AIUtil.getImplementOrVehicleWithSpecialization(self.vehicle, Trailer) or
+            AIUtil.getImplementOrVehicleWithSpecialization(self.vehicle, HookLiftTrailer) or self.vehicle
+    local dx, _, _ = localToLocal(referenceObject.rootNode, combine:getAIDirectionNode(), 0, 0, 0)
+    local xOffset = self.vehicle.size.width / 2 + combineStrategy:getWorkWidth() / 2 + 2
+    xOffset = dx > 0 and xOffset or -xOffset
+    local _, _, from = localToLocal(Markers.getFrontMarkerNode(self.vehicle), combine:getAIDirectionNode(), 0, 0, 0)
+    self:debug('moving past %s, xOffset %.1f, from %.1f', CpUtil.getName(combine), xOffset, from)
+    local course = Course.createFromNode(self.vehicle, combine:getAIDirectionNode(), xOffset, from,
+            from + self.maxDistanceWhenMovingOutOfWay, 5, false)
+    self:setNewState(self.states.MOVING_AWAY_FROM_OTHER_VEHICLE)
+    self.state.properties.vehicle = combine
+    self.state.properties.dx = xOffset
+    self:startCourse(course, 1)
 end
 
 ------------------------------------------------------------------------------------------------------------------------
@@ -2564,8 +2603,8 @@ function AIDriveStrategyUnloadCombine:onUnloadingMovingCombineFinished(combineSt
         -- make some room for the pathfinder, as the trailer may not be full but has reached the threshold,
         --, which case is not caught in changeToUnloadWhenTrailerFull() as we want to keep unloading as long as
         -- we can
-        if self:anotherUnloaderIsStagingBehind(self.combineToUnload) then
-            self:debug('combine empty and we want to leave; follower staged behind us, peeling off forward')
+        if combineStrategy:alwaysNeedsUnloader() or self:anotherUnloaderIsStagingBehind(self.combineToUnload) then
+            self:debug('combine empty and we want to leave; chopper or follower staged behind us, peeling off forward')
             self:startUnloadingTrailers()
         else
             self:debug('combine empty and moving forward but we want to leave, so move back a bit')
@@ -2610,9 +2649,16 @@ function AIDriveStrategyUnloadCombine.getCustomJobDisplayText(vehicle)
     local strategy = vehicle ~= nil and vehicle.getCpDriveStrategy ~= nil and vehicle:getCpDriveStrategy()
     local combine = strategy and strategy.combineToUnload
     local combineStrategy = combine ~= nil and combine.getCpDriveStrategy ~= nil and combine:getCpDriveStrategy()
-    if combineStrategy and combineStrategy.isStraightUnloadOnly and combineStrategy:isStraightUnloadOnly() and
-            FillType.PEA ~= nil and combineStrategy:getFillType() == FillType.PEA then
-        return g_i18n:getText('CP_job_peaHarvesterUnload')
+    if combineStrategy and combineStrategy.isStraightUnloadOnly and combineStrategy:isStraightUnloadOnly() then
+        -- the fill type reads UNKNOWN whenever the harvester's bunker bottoms out (it often does
+        -- while unloading on the move), so latch the last known fill type to keep the text stable
+        local fillType = combineStrategy:getFillType()
+        if fillType ~= nil and fillType ~= FillType.UNKNOWN then
+            strategy.straightUnloadTargetFillType = fillType
+        end
+        if FillType.PEA ~= nil and strategy.straightUnloadTargetFillType == FillType.PEA then
+            return g_i18n:getText('CP_job_peaHarvesterUnload')
+        end
     end
     return nil
 end
