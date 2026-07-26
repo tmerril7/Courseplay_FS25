@@ -540,7 +540,8 @@ function CpBaseHud:updateContent(vehicle, status)
         activeLayout:setDisabled(false)
         activeLayout:updateContent(vehicle, status)
     end
-    self.selectedJobBtn:setTextDetails(vehicle:cpGetHudSelectedJobSetting():getString())
+    self.selectedJobBtn:setTextDetails(AIDriveStrategyUnloadCombine.getCustomJobDisplayText(vehicle)
+            or vehicle:cpGetHudSelectedJobSetting():getString())
     self.selectedJobBtn:setDisabled(vehicle:getIsAIActive())
 
     self.clearCourseBtn:setVisible(vehicle:hasCpCourse() and not vehicle:getIsCpActive())

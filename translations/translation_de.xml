@@ -105,6 +105,7 @@
     <text name="CP_job_fieldWork" text="CP: Feldarbeit"/>
     <text name="CP_job_baleCollect" text="CP: Ballen sammeln/wickeln"/>
     <text name="CP_job_combineUnload" text="CP: Drescher entladen"/>
+    <text name="CP_job_peaHarvesterUnload" text="CP: Erbsenroder entladen"/>
     <text name="CP_job_bunkerSilo" text="CP: Siloarbeit"/>
     <text name="CP_job_siloLoader" text="CP: Silo laden"/>
     <text name="CP_ai_page_generate_course" text="CP: Feldkurs generieren"/>

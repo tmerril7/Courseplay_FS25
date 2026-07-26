@@ -105,6 +105,7 @@
     <text name="CP_job_fieldWork" text="CP: 필드 작업"/>
     <text name="CP_job_baleCollect" text="CP: 베일 수집/포장"/>
     <text name="CP_job_combineUnload" text="CP: 콤바인 하역"/>
+    <text name="CP_job_peaHarvesterUnload" text="CP: Unload Pea Harvester"/>
     <text name="CP_job_bunkerSilo" text="CP: 벙커 사일로 작업"/>
     <text name="CP_job_siloLoader" text="CP: 사일로 적재"/>
     <text name="CP_ai_page_generate_course" text="CP: 필드 작업 경로 생성."/>

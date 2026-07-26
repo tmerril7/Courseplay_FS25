@@ -373,10 +373,16 @@ function PipeController:measurePipeProperties()
     self:printFoldableDebug()
     self:printPipeDebug()
     local configOffsetX = g_vehicleConfigurations:get(self.implement, "unloadOffsetX" )
-    if configOffsetX ~= nil then 
+    if configOffsetX ~= nil then
         self:debug("Setting pipe x offset to configured %.2f x offset", configOffsetX)
         self.pipeOffsetX = configOffsetX
     end
+    local configOffsetZ = g_vehicleConfigurations:get(self.implement, "unloadOffsetZ" )
+    if configOffsetZ ~= nil then
+        self:debug("Setting pipe z offset to configured %.2f z offset", configOffsetZ)
+        self.pipeOffsetZ = configOffsetZ
+    end
+    self.pipeOnLeftSide = self.pipeOffsetX >= 0
 end
 
 --- Unfolds the pipe completely to measure the pipe properties.

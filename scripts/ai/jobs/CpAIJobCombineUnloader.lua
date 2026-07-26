@@ -366,7 +366,7 @@ end
 --- TODO: Add the missing description once the task system is better implemented.
 ---@return unknown
 function CpAIJobCombineUnloader:getDescription()
-	local desc = CpAIJob.getDescription(self)
+	local desc = AIDriveStrategyUnloadCombine.getCustomJobDisplayText(self:getVehicle()) or CpAIJob.getDescription(self)
 	local currentTask = self:getTaskByIndex(self.currentTaskIndex)
     if currentTask == self.driveToTask then
 		desc = desc .. " - " .. g_i18n:getText("ai_taskDescriptionDriveToField")

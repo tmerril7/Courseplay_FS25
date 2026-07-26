@@ -170,6 +170,17 @@ You can define the following custom settings:
     like the Oxbo, are not detected correctly. This setting can be used to disable the pocket creation for these
     harvesters.
 
+- unloadOffsetZ: number
+    Offset of the discharge node or a given pipe for unloading into a trailer, in the direction of driving.
+    For pipes this overwrites the measured pipe z offset, similar to unloadOffsetX.
+
+- straightUnloadOnly: boolean
+    For harvesters whose unload conveyor/pipe only deploys once the trailer is already in position beside
+    them and which cannot discharge through turns (vegetable harvesters like the Oxbo EPD 540E pea
+    harvester). A CP unloader serving such a harvester will only unload on straight sections: it breaks
+    off well before the row end, lets the harvester take the headland turn alone, and rejoins on the
+    next straight.
+
 -->
 <VehicleConfigurations>
 	<Configurations>
@@ -203,6 +214,8 @@ You can define the following custom settings:
         <Configuration type="BOOL">closePipeAfterUnload</Configuration>
         <Configuration type="INT">tipSideIndex</Configuration>
         <Configuration type="BOOL">disablePocket</Configuration>
+        <Configuration type="FLOAT">unloadOffsetZ</Configuration>
+        <Configuration type="BOOL">straightUnloadOnly</Configuration>
 	</Configurations>
     <!--[GIANTS]-->
 
@@ -254,6 +267,8 @@ You can define the following custom settings:
     <Vehicle name="epd540E.xml"
              closePipeAfterUnload = "true"
              disablePocket = "true"
+             unloadOffsetX = "3.8"
+             straightUnloadOnly = "true"
     />
 
     <!--vehicles\gregoire-->

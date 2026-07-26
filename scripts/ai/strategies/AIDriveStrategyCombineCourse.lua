@@ -22,6 +22,13 @@ AIDriveStrategyCombineCourse = CpObject(AIDriveStrategyFieldWorkCourse)
 -- fill level when we start making a pocket to unload if we are on the outermost headland
 AIDriveStrategyCombineCourse.pocketFillLevelFullPercentage = 95
 AIDriveStrategyCombineCourse.safeUnloadDistanceBeforeEndOfRow = 30
+-- straight-unload-only harvesters (straightUnloadOnly vehicle configuration, like the Oxbo EPD 540E
+-- pea harvester): the unloader must break off this far before the row end so the conveyor is retracted
+-- and the harvester can turn unhindered
+AIDriveStrategyCombineCourse.straightUnloadBreakOffDistance = 35
+-- and the course must not bend tighter than this radius within the lookahead distance to count as straight
+AIDriveStrategyCombineCourse.straightUnloadMinRadius = 70
+AIDriveStrategyCombineCourse.straightUnloadLookAheadDistance = 20
 -- when fill level is above this threshold, don't start the next row if the pipe would be
 -- in the fruit
 AIDriveStrategyCombineCourse.waitForUnloadAtEndOfRowFillLevelThreshold = 95
@@ -1232,10 +1239,26 @@ function AIDriveStrategyCombineCourse:findBestWaypointToUnloadOnUpDownRows(ix, i
             self:debug('pipe is not in fruit at %d. If it is towards the end of the row, bring it up a bit', ix)
         end
         -- so we'll have some distance for unloading
-        if ixAtRowStart and dToNextTurn < AIDriveStrategyCombineCourse.safeUnloadDistanceBeforeEndOfRow then
-            local safeIx = self.course:getPreviousWaypointIxWithinDistance(ix,
-                    AIDriveStrategyCombineCourse.safeUnloadDistanceBeforeEndOfRow)
-            newWpIx = math.max(ixAtRowStart + 1, safeIx or -1, ix - 4, currentIx)
+        local dNeededBeforeRowEnd = AIDriveStrategyCombineCourse.safeUnloadDistanceBeforeEndOfRow
+        if self:isStraightUnloadOnly() then
+            -- the unloader breaks off well before the row end, so the meeting point needs to leave
+            -- unload runway before that break off point
+            dNeededBeforeRowEnd = dNeededBeforeRowEnd + AIDriveStrategyCombineCourse.straightUnloadBreakOffDistance
+        end
+        if ixAtRowStart and dToNextTurn < dNeededBeforeRowEnd then
+            local nextRowStartIx = self.course:getNextRowStartIx(ix)
+            local lNextRow = self.course:getNextRowLength(ix)
+            if self:isStraightUnloadOnly() and nextRowStartIx and lNextRow and lNextRow > dNeededBeforeRowEnd then
+                -- straight unload only: instead of squeezing the rendezvous in before the turn, meet
+                -- on the next row where there is a full straight ahead of us
+                self:debug('Straight unload only: rendezvous %d too close to row end, moving to next row start at %d',
+                        ix, nextRowStartIx + 2)
+                newWpIx = nextRowStartIx + 2
+            else
+                local safeIx = self.course:getPreviousWaypointIxWithinDistance(ix,
+                        AIDriveStrategyCombineCourse.safeUnloadDistanceBeforeEndOfRow)
+                newWpIx = math.max(ixAtRowStart + 1, safeIx or -1, ix - 4, currentIx)
+            end
         end
     end
     -- no better idea, just use the original estimated, making sure we avoid turn start waypoints
@@ -2028,6 +2051,45 @@ function AIDriveStrategyCombineCourse:isOnHeadland(n)
     return self.course:isOnHeadland(self.course:getCurrentWaypointIx(), n)
 end
 
+--- Does this harvester's unload conveyor/pipe only deploy once the trailer is in position, so it can
+--- only be unloaded while driving straight (straightUnloadOnly vehicle configuration, e.g. the
+--- Oxbo EPD 540E pea harvester)?
+function AIDriveStrategyCombineCourse:isStraightUnloadOnly()
+    if self.straightUnloadOnlyCached == nil then
+        self.straightUnloadOnlyCached =
+                g_vehicleConfigurations:getRecursively(self.vehicle, 'straightUnloadOnly') or false
+    end
+    return self.straightUnloadOnlyCached
+end
+
+--- For straight-unload-only harvesters: is it currently safe for the unloader to drive beside us and
+--- unload? False while turning, within the break off distance of the next turn (row end), or when the
+--- course ahead bends too much. Always true for normal harvesters.
+function AIDriveStrategyCombineCourse:isSafeToUnloadOnStraight()
+    if not self:isStraightUnloadOnly() then
+        return true
+    end
+    if self:isTurning() then
+        return false
+    end
+    if not self.course or self.course:isTemporary() then
+        return false
+    end
+    local ix = self.ppc:getRelevantWaypointIx()
+    local dToNextTurn = self.course:getDistanceToNextTurn(ix) or math.huge
+    if dToNextTurn < AIDriveStrategyCombineCourse.straightUnloadBreakOffDistance then
+        self:debugSparse('isSafeToUnloadOnStraight(): row end in %.0f m, not safe', dToNextTurn)
+        return false
+    end
+    local minRadius = self.course:getMinRadiusWithinDistance(ix,
+            AIDriveStrategyCombineCourse.straightUnloadLookAheadDistance)
+    if minRadius and minRadius < AIDriveStrategyCombineCourse.straightUnloadMinRadius then
+        self:debugSparse('isSafeToUnloadOnStraight(): course bends (radius %.0f m), not safe', minRadius)
+        return false
+    end
+    return true
+end
+
 --- Are we ready for an unloader?
 --- @param noUnloadWithPipeInFruit boolean pipe must not be in fruit for unload
 function AIDriveStrategyCombineCourse:isReadyToUnload(noUnloadWithPipeInFruit)
@@ -2055,7 +2117,12 @@ function AIDriveStrategyCombineCourse:isReadyToUnload(noUnloadWithPipeInFruit)
 
     -- around a turn, for example already working on the next row but not done with the turn yet
 
-    if self.course:isCloseToNextTurn(10) then
+    if self:isStraightUnloadOnly() then
+        if not self:isSafeToUnloadOnStraight() then
+            self:debugSparse('isReadyToUnload(): straight unload only and not on a safe straight section')
+            return false
+        end
+    elseif self.course:isCloseToNextTurn(10) then
         self:debugSparse('isReadyToUnload(): too close to turn')
         return false
     end

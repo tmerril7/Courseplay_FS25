@@ -105,6 +105,7 @@
     <text name="CP_job_fieldWork" text="コースプレイ:野外作業"/>
     <text name="CP_job_baleCollect" text="コースプレイ:ベール収集/ラップ"/>
     <text name="CP_job_combineUnload" text="CP: Unload Combine"/>
+    <text name="CP_job_peaHarvesterUnload" text="CP: Unload Pea Harvester"/>
     <text name="CP_job_bunkerSilo" text="CP: Silo work"/>
     <text name="CP_job_siloLoader" text="CP: Silo loading"/>
     <text name="CP_ai_page_generate_course" text="野外作業コースを生成する"/>

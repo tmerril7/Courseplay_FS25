@@ -105,6 +105,7 @@
     <text name="CP_job_fieldWork" text="Courseplay"/>
     <text name="CP_job_baleCollect" text="CP: Raccogli/Avvolgi balle"/>
     <text name="CP_job_combineUnload" text="CP: scarica mietitrebbia"/>
+    <text name="CP_job_peaHarvesterUnload" text="CP: Unload Pea Harvester"/>
     <text name="CP_job_bunkerSilo" text="CP: Lavoro in silos"/>
     <text name="CP_job_siloLoader" text="CP: Caricamento del silos"/>
     <text name="CP_ai_page_generate_course" text="[CP] Genera percorso di lavoro"/>

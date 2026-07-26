@@ -2461,8 +2461,24 @@ function AIDriveStrategyUnloadCombine:unloadMovingCombine()
         return
     end
 
+    if not combineStrategy:isTurning() and not combineStrategy:isSafeToUnloadOnStraight() then
+        -- straight-unload-only harvester (like a pea harvester): its conveyor only deploys with the
+        -- trailer in position and it can't discharge through turns. Break off before the row end: ease
+        -- off so we fall behind and the conveyor retracts before the harvester starts the turn. Once it
+        -- turns (or we drop out of alignment), the normal recovery below re-stages us for the next straight.
+        self:debugSparse('Straight unload only harvester close to row end, easing off to fall behind')
+        self:setMaxSpeed(math.max(0, self.combineToUnload:getLastSpeed() - 5))
+    end
+
     if combineStrategy:isTurning() then
         if not combineStrategy:isFinishingRow() then
+            if combineStrategy:isStraightUnloadOnly() then
+                -- a straight-unload-only harvester won't hold in the turn for us, give it room to
+                -- turn and re-stage for the next straight section
+                self:debug('Straight unload only harvester turning, moving out of the way')
+                self:onUnloadingMovingCombineFinished(combineStrategy)
+                return gx, gz
+            end
             -- harvester is now about the start the turn after it finished the row
             -- in any case, we stop here, don't want to follow it through the turn.
             -- We expect it to stop here as well until empty (see shouldHoldInTurnManeuver())
@@ -2552,6 +2568,22 @@ function AIDriveStrategyUnloadCombine:startMovingBackFromCombine(newState, combi
     self.state.properties.vehicle = combine
     self.state.properties.holdCombine = holdCombineWhileMovingBack
     return
+end
+
+--- If this vehicle is a CP unloader currently serving a straight-unload-only pea harvester, return the
+--- custom job display text ("CP: Unload Pea Harvester"), nil otherwise (also on MP clients, where the
+--- unload target is not known - they fall back to the standard job text).
+---@param vehicle table|nil
+---@return string|nil
+function AIDriveStrategyUnloadCombine.getCustomJobDisplayText(vehicle)
+    local strategy = vehicle ~= nil and vehicle.getCpDriveStrategy ~= nil and vehicle:getCpDriveStrategy()
+    local combine = strategy and strategy.combineToUnload
+    local combineStrategy = combine ~= nil and combine.getCpDriveStrategy ~= nil and combine:getCpDriveStrategy()
+    if combineStrategy and combineStrategy.isStraightUnloadOnly and combineStrategy:isStraightUnloadOnly() and
+            FillType.PEA ~= nil and combineStrategy:getFillType() == FillType.PEA then
+        return g_i18n:getText('CP_job_peaHarvesterUnload')
+    end
+    return nil
 end
 
 ------------------------------------------------------------------------------------------------------------------------

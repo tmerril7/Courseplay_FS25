@@ -105,6 +105,7 @@
     <text name="CP_job_fieldWork" text="CP: Terepmunka"/>
     <text name="CP_job_baleCollect" text="CP: Bálagyűjtés/csomagolás"/>
     <text name="CP_job_combineUnload" text="CP: Kombájn ürítése"/>
+    <text name="CP_job_peaHarvesterUnload" text="CP: Unload Pea Harvester"/>
     <text name="CP_job_bunkerSilo" text="CP: Bunker siló munka"/>
     <text name="CP_job_siloLoader" text="CP: Siló töltés"/>
     <text name="CP_ai_page_generate_course" text="CP: Útvonaltervezés"/>

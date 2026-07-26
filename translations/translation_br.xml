@@ -105,6 +105,7 @@
     <text name="CP_job_fieldWork" text="CP: Trabalho no campo"/>
     <text name="CP_job_baleCollect" text="CP: Fardo coletar/embalar"/>
     <text name="CP_job_combineUnload" text="CP: Descarregar colheitadeira"/>
+    <text name="CP_job_peaHarvesterUnload" text="CP: Unload Pea Harvester"/>
     <text name="CP_job_bunkerSilo" text="CP: Trabalho no silo"/>
     <text name="CP_job_siloLoader" text="CP: Silo carregando"/>
     <text name="CP_ai_page_generate_course" text="CP: Gerar rotas no campo."/>

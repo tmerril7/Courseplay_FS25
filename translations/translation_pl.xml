@@ -105,6 +105,7 @@
     <text name="CP_job_fieldWork" text="CP: Prace polowe"/>
     <text name="CP_job_baleCollect" text="CP: Zbieranie/Owijanie bel"/>
     <text name="CP_job_combineUnload" text="CP: Rozładunek kombajnu"/>
+    <text name="CP_job_peaHarvesterUnload" text="CP: Unload Pea Harvester"/>
     <text name="CP_job_bunkerSilo" text="CP: Silos bunkrowy"/>
     <text name="CP_job_siloLoader" text="CP: Załadunek pryzmy"/>
     <text name="CP_ai_page_generate_course" text="CP: Wygeneruj kurs pracy polowej"/>

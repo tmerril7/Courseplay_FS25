@@ -105,6 +105,7 @@
     <text name="CP_job_fieldWork" text="CP: Роботи у полі"/>
     <text name="CP_job_baleCollect" text="CP: Збір/обгортання тюків"/>
     <text name="CP_job_combineUnload" text="CP: Розвантаження комбайну"/>
+    <text name="CP_job_peaHarvesterUnload" text="CP: Unload Pea Harvester"/>
     <text name="CP_job_bunkerSilo" text="CP: Робота у силосній ямі"/>
     <text name="CP_job_siloLoader" text="CP: Навантаження з насипу"/>
     <text name="CP_ai_page_generate_course" text="CP: Згенерувати маршрут"/>

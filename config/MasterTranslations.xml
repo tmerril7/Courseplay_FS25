@@ -339,6 +339,10 @@
 			<Text language="de"><![CDATA[CP: Drescher entladen]]></Text>
 			<Text language="en"><![CDATA[CP: Unload Combine]]></Text>
 		</Translation>
+		<Translation name="CP_job_peaHarvesterUnload">
+			<Text language="de"><![CDATA[CP: Erbsenroder entladen]]></Text>
+			<Text language="en"><![CDATA[CP: Unload Pea Harvester]]></Text>
+		</Translation>
 		<Translation name="CP_job_bunkerSilo">
 			<Text language="de"><![CDATA[CP: Siloarbeit]]></Text>
 			<Text language="en"><![CDATA[CP: Silo work]]></Text>
