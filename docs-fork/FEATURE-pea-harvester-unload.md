@@ -1,6 +1,7 @@
 # Pea harvester (Oxbo EPD 540E) chaser support — straight-only unload
 
-Date: 2026-07-25. Branch: fork/crash-fixes. Status: round 2 after first in-game test (2026-07-26).
+Date: 2026-07-25. Branch: fork/crash-fixes.
+Status: **v8.2.0.0 beta VERIFIED in-game 2026-07-26** (rounds 1-8, "testing went great, no comments").
 
 ## Round 1 in-game test results (Travis, 2026-07-26)
 
