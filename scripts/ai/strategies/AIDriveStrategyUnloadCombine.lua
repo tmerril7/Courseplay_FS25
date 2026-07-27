@@ -2501,23 +2501,21 @@ end
 --- after unloading a stopped straight-unload-only harvester: it moves us out of the way faster and
 --- avoids backing up a trailer with a pivoting front axle.
 function AIDriveStrategyUnloadCombine:startMovingPastCombine(combine)
-    local combineStrategy = combine:getCpDriveStrategy()
-    local referenceObject = AIUtil.getImplementOrVehicleWithSpecialization(self.vehicle, Trailer) or
-            AIUtil.getImplementOrVehicleWithSpecialization(self.vehicle, HookLiftTrailer) or self.vehicle
-    local dx, _, _ = localToLocal(referenceObject.rootNode, combine:getAIDirectionNode(), 0, 0, 0)
-    -- swing out a full work width plus clearance: the harvester will drive forward and diagonally
-    -- back into its cut line when it resumes, so we need to be clear of that whole corridor
-    local xOffset = self.vehicle.size.width / 2 + combineStrategy:getWorkWidth() + 3
-    xOffset = dx > 0 and xOffset or -xOffset
+    -- The pulled back harvester backed out AWAY from the pipe side, so its resume path cuts
+    -- diagonally back toward the pipe side to rejoin the crop line. We are unloading in the pipe
+    -- side lane, i.e. exactly in that corridor. The safe spot is IN LINE with the harvester's
+    -- current (backed out) position: straight ahead of it on the harvested ground - so pull
+    -- forward and across to xOffset 0 relative to the harvester, far enough ahead that it can
+    -- pull around us on the pipe side when it resumes.
     local _, _, from = localToLocal(Markers.getFrontMarkerNode(self.vehicle), combine:getAIDirectionNode(), 0, 0, 0)
-    self:debug('moving past %s, xOffset %.1f, from %.1f', CpUtil.getName(combine), xOffset, from)
-    local course = Course.createFromNode(self.vehicle, combine:getAIDirectionNode(), xOffset, from,
+    self:debug('moving past %s to park in line ahead of it, from %.1f', CpUtil.getName(combine), from)
+    local course = Course.createFromNode(self.vehicle, combine:getAIDirectionNode(), 0, from,
             from + 2 * self.maxDistanceWhenMovingOutOfWay, 5, false)
     self:setNewState(self.states.MOVING_AWAY_FROM_OTHER_VEHICLE)
     self.state.properties.vehicle = combine
-    self.state.properties.dx = xOffset
-    -- and don't stop until the whole rig is also well ahead of the parked harvester
-    self.state.properties.minDz = 15
+    self.state.properties.dx = 0
+    -- don't stop until the whole rig is well ahead of the parked harvester
+    self.state.properties.minDz = 20
     self:startCourse(course, 1)
 end
 

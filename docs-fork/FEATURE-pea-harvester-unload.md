@@ -168,6 +168,18 @@ FIX: `isSafeToUnloadOnStraight` returns true whenever the harvester is in `UNLOA
    trailer vs tractor heading dot product) — otherwise creeps at 5 km/h along the lane until the
    rig is straight (hard stop 2 m before course end regardless).
 
+## Round 7 (2026-07-26) — pulled-back escape direction + v8.2.0.0 beta
+
+The forward escape after a pulled-back unload pulled far enough ahead but turned the WRONG WAY:
+side was chosen by "which side is the trailer on" = the pipe side (left) = exactly the corridor
+the pulled-back harvester (backed out right, away from the pipe) drives through to cut back in.
+FIX: `startMovingPastCombine` now parks IN LINE with the harvester's current backed-out position
+(xOffset 0 relative to its direction node, minDz raised to 20): straight ahead on the harvested
+ground, so the harvester pulls around on the pipe side to resume. Generalizes for any pipe side
+since a pull-back is always away from the pipe.
+
+Mod version bumped to **8.2.0.0** — Travis declared this the solid-beta cut.
+
 ## Tuning without rebuild
 
 `unloadOffsetX/Z` can be hot-tuned in-game: put an override in
