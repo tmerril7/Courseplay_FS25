@@ -401,10 +401,24 @@ function AIDriveStrategyUnloadCombine:getDriveData(dt, vX, vY, vZ)
         end
     end
 
+    if not self:hasToWaitForAssignedCombine() then
+        self.combineLostTimer = nil
+    end
     if self:hasToWaitForAssignedCombine() then
         --- Safety check to make sure a combine is assigned, when needed.
         self:setMaxSpeed(0)
         self:debugSparse("Combine to unload lost during unload, waiting for something todo.")
+        -- upstream never recovers from this: if the assigned harvester's driver is gone for good
+        -- (job stopped or finished), we would sit here wedged forever. Give it a grace period for
+        -- stop/restart transitions, then release it and go back to looking for work.
+        if self.combineLostTimer == nil then
+            self.combineLostTimer = g_time
+        elseif g_time - self.combineLostTimer > 5000 then
+            self:debug('Assigned combine gone for more than 5 seconds, giving up on it')
+            self.combineLostTimer = nil
+            self:releaseCombine()
+            self:startWaitingForSomethingToDo()
+        end
         if self:isDriveUnloadNowRequested() then
             self:debug('Drive unload now requested')
             self:startUnloadingTrailers()

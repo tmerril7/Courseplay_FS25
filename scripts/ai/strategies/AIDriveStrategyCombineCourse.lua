@@ -32,8 +32,11 @@ AIDriveStrategyCombineCourse.straightUnloadLookAheadDistance = 20
 -- within this distance of the row end the breaking off unloader stops completely
 AIDriveStrategyCombineCourse.straightUnloadHoldOffDistance = 18
 -- call the unloader at this fill percentage already (if lower than the user setting): valid unload
--- windows (straight section + pipe not in fruit) are scarce, use them when they come up
-AIDriveStrategyCombineCourse.straightUnloadCallPercent = 30
+-- windows (straight section + pipe not in fruit) are scarce, use them when they come up. Keep this
+-- LOW: below this fill the meeting point is estimated from the fill rate and usually lands beyond
+-- the row end (-> rejected, same-row-only rule); at/above it the meeting point is set up right
+-- ahead of us, so the call happens early in the row while the meet still fits before the end zone.
+AIDriveStrategyCombineCourse.straightUnloadCallPercent = 15
 -- never set up a meeting point closer than this ahead of us: the unloader approaches with a loop to
 -- line up parallel and needs to complete that loop before we arrive, otherwise it ends up crossing
 -- right in front of us

@@ -180,6 +180,22 @@ since a pull-back is always away from the pipe.
 
 Mod version bumped to **8.2.0.0** — Travis declared this the solid-beta cut.
 
+## Round 8 (2026-07-26, log review before beta test)
+
+1. **Missed opportunistic unloads.** Log: below 30% fill, the meeting point is estimated from the
+   fill rate and lands beyond the row end (often clamped to the course's LAST waypoint, 2402) →
+   rejected by the same-row rule; when fill crossed 30% mid-row the harvester was already inside
+   the 115 m end zone (50 min-meet + 65 runway) → whole row's window missed → harvester filled →
+   back-out stopped unload. FIX: `straightUnloadCallPercent` 30 → **15**. At/above 15% the seed is
+   the current waypoint (negative liters-until-call → `getNextWaypointIxWithinDistance` returns
+   the next wp immediately), so the call is attempted right at the start of every unloadable row.
+2. **"Combine to unload lost during unload" wedge (upstream bug).** When the assigned harvester's
+   driver goes away mid-approach (job stopped/finished), `hasToWaitForAssignedCombine()` parks the
+   chaser at speed 0 and logs forever — upstream's recovery block is an empty stub. Seen in the
+   log spamming every 5 s until the job was manually restarted (matches the wedge seen once in
+   the convoy work too). FIX: 5 s grace (`combineLostTimer`, allows stop/restart transitions per
+   the upstream comment), then `releaseCombine()` + `startWaitingForSomethingToDo()`.
+
 ## Tuning without rebuild
 
 `unloadOffsetX/Z` can be hot-tuned in-game: put an override in
