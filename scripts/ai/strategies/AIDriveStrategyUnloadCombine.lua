@@ -2505,15 +2505,19 @@ function AIDriveStrategyUnloadCombine:startMovingPastCombine(combine)
     local referenceObject = AIUtil.getImplementOrVehicleWithSpecialization(self.vehicle, Trailer) or
             AIUtil.getImplementOrVehicleWithSpecialization(self.vehicle, HookLiftTrailer) or self.vehicle
     local dx, _, _ = localToLocal(referenceObject.rootNode, combine:getAIDirectionNode(), 0, 0, 0)
-    local xOffset = self.vehicle.size.width / 2 + combineStrategy:getWorkWidth() / 2 + 2
+    -- swing out a full work width plus clearance: the harvester will drive forward and diagonally
+    -- back into its cut line when it resumes, so we need to be clear of that whole corridor
+    local xOffset = self.vehicle.size.width / 2 + combineStrategy:getWorkWidth() + 3
     xOffset = dx > 0 and xOffset or -xOffset
     local _, _, from = localToLocal(Markers.getFrontMarkerNode(self.vehicle), combine:getAIDirectionNode(), 0, 0, 0)
     self:debug('moving past %s, xOffset %.1f, from %.1f', CpUtil.getName(combine), xOffset, from)
     local course = Course.createFromNode(self.vehicle, combine:getAIDirectionNode(), xOffset, from,
-            from + self.maxDistanceWhenMovingOutOfWay, 5, false)
+            from + 2 * self.maxDistanceWhenMovingOutOfWay, 5, false)
     self:setNewState(self.states.MOVING_AWAY_FROM_OTHER_VEHICLE)
     self.state.properties.vehicle = combine
     self.state.properties.dx = xOffset
+    -- and don't stop until the whole rig is also well ahead of the parked harvester
+    self.state.properties.minDz = 15
     self:startCourse(course, 1)
 end
 
@@ -2777,6 +2781,7 @@ function AIDriveStrategyUnloadCombine:onBlockingVehicle(blockingVehicle, isBack)
             self:setNewState(self.states.MOVING_AWAY_FROM_OTHER_VEHICLE)
             self.state.properties.vehicle = blockingVehicle
             self.state.properties.dx = nil
+            self.state.properties.minDz = nil
             if isBlockingVehicleAheadOfUs and
                     CpMathUtil.isOppositeDirection(self.vehicle:getAIDirectionNode(), blockingVehicle:getAIDirectionNode(), 30) then
                 -- we are head on with the combine, so reverse
@@ -2831,6 +2836,7 @@ function AIDriveStrategyUnloadCombine:onBlockingVehicle(blockingVehicle, isBack)
             self:setNewState(self.states.MOVING_AWAY_FROM_OTHER_VEHICLE)
             self.state.properties.vehicle = blockingVehicle
             self.state.properties.dx = nil
+            self.state.properties.minDz = nil
             if blockingVehicle.cpHold then
                 -- ask the other vehicle for hold until we drive around
                 blockingVehicle:cpHold(20000)
@@ -2850,6 +2856,7 @@ function AIDriveStrategyUnloadCombine:requestToMoveForward(requestingVehicle)
     self:setNewState(self.states.MOVING_AWAY_FROM_OTHER_VEHICLE)
     self.state.properties.vehicle = requestingVehicle
     self.state.properties.dx = nil
+    self.state.properties.minDz = nil
     self:startCourse(course, 1)
 end
 
@@ -2875,9 +2882,13 @@ function AIDriveStrategyUnloadCombine:moveAwayFromOtherVehicle()
     if self.state.properties.dx then
         -- moving away from a CP combine head on with us, move until dx is big enough so it can continue straight
         for _, childVehicle in ipairs(self.vehicle:getChildVehicles()) do
-            local dx, _, _ = localToLocal(childVehicle.rootNode, self.state.properties.vehicle:getAIDirectionNode(), 0, 0, 0)
-            self:debugSparse('dx between %s and my %s is %.1f', CpUtil.getName(self.state.properties.vehicle), CpUtil.getName(childVehicle), dx)
+            local dx, _, dz = localToLocal(childVehicle.rootNode, self.state.properties.vehicle:getAIDirectionNode(), 0, 0, 0)
+            self:debugSparse('dx between %s and my %s is %.1f (dz %.1f)', CpUtil.getName(self.state.properties.vehicle), CpUtil.getName(childVehicle), dx, dz)
             if math.abs(dx) < math.abs(self.state.properties.dx) - 1 then
+                return
+            end
+            if self.state.properties.minDz and dz < self.state.properties.minDz then
+                -- also required to get well ahead (like clear of a parked harvester about to resume)
                 return
             end
         end
