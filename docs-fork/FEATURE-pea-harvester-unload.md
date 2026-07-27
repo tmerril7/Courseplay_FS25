@@ -151,6 +151,23 @@ keeps the chaser registered, so the harvester logs "already has an unloader assi
 FIX: `isSafeToUnloadOnStraight` returns true whenever the harvester is in `UNLOADING_ON_FIELD`
 (stopped/maneuvering to be unloaded in place) — the break off distance only applies on the move.
 
+## Round 6 (2026-07-26, screenshot + log: head-on staging + angled trailer)
+
+1. **Cross-row meets are structurally unsafe — removed.** Log showed the near-row-end push
+   repeatedly moving the meet to wp 2157 on the NEXT row. Geometry: on the next row (opposite
+   direction) the chaser's unload lane — the pipe side, i.e. the just-cut side — IS the
+   harvester's CURRENT row. A chaser pre-staged there parks head-on in the harvester's path by
+   construction (screenshot confirmed). `findNextStraightUnloadRowIx` deleted; straight-only
+   meets are now strictly same-row: `isTurnBetween(current, meet)` → nil, near-row-end → nil.
+   After each turn, the 3 s call loop establishes a mid-row meet on the new row within seconds
+   (same-row staging is safe: the lane there is the PREVIOUS row, already cut).
+2. **Trailer left angled across the lane when staged early.** The chaser parked as soon as the
+   tractor reached the wait point; the trailer was still angled from the alignment loop, standing
+   in the harvester's path. FIX: approach-course extension is 3× (30 m) for straight-only
+   targets, and the "combine is late" wait only stops when `isTrailerStraight(10°)` (new helper,
+   trailer vs tractor heading dot product) — otherwise creeps at 5 km/h along the lane until the
+   rig is straight (hard stop 2 m before course end regardless).
+
 ## Tuning without rebuild
 
 `unloadOffsetX/Z` can be hot-tuned in-game: put an override in

@@ -1891,7 +1891,14 @@ function AIDriveStrategyUnloadCombine:onPathfindingDoneToMovingCombine(controlle
         -- last waypoint. Therefore, use the rendezvousWaypoint's direction instead
         local dx = self.rendezvousWaypoint and self.rendezvousWaypoint.dx
         local dz = self.rendezvousWaypoint and self.rendezvousWaypoint.dz
-        course:extend(AIDriveStrategyUnloadCombine.driveToCombineCourseExtensionLength, dx, dz)
+        local extensionLength = AIDriveStrategyUnloadCombine.driveToCombineCourseExtensionLength
+        if self.combineToUnload and self.combineToUnload:getCpDriveStrategy():isStraightUnloadOnly() then
+            -- longer straight section along the lane, so if we arrive first and park to wait, the
+            -- trailer has room to straighten out fully behind the tractor - a trailer still angled
+            -- from the alignment loop stands across the harvester's path
+            extensionLength = 3 * extensionLength
+        end
+        course:extend(extensionLength, dx, dz)
         self:startCourse(course, 1)
         self:setNewState(self.states.DRIVING_TO_MOVING_COMBINE)
         return true
@@ -2340,6 +2347,16 @@ end
 ------------------------------------------------------------------------------------------------------------------------
 -- Drive to moving combine
 ------------------------------------------------------------------------------------------------------------------------
+--- Is the trailer lined up straight behind the tractor (within maxAngleDeg)?
+function AIDriveStrategyUnloadCombine:isTrailerStraight(maxAngleDeg)
+    if not self.trailer then
+        return true
+    end
+    local tx, _, tz = localDirectionToWorld(self.trailer.rootNode, 0, 0, 1)
+    local vx, _, vz = localDirectionToWorld(self.vehicle:getAIDirectionNode(), 0, 0, 1)
+    return (tx * vx + tz * vz) > math.cos(math.rad(maxAngleDeg or 10))
+end
+
 --- Are we in the final stretch of the approach course to a straight-unload-only harvester? There the
 --- alignment loop may swing across the harvester's path: we ignore the harvester in our proximity
 --- sensor (see ignoreProximityObject) and hold it instead, so we complete the loop and get parallel
@@ -2386,8 +2403,15 @@ function AIDriveStrategyUnloadCombine:driveToMovingCombine()
 
     if self.course:isCloseToLastWaypoint(AIDriveStrategyUnloadCombine.driveToCombineCourseExtensionLength / 2) and
             self.combineToUnload:getCpDriveStrategy():hasRendezvousWith(self.vehicle) then
-        self:debugSparse('Combine is late, waiting ...')
-        self:setMaxSpeed(0)
+        if self:isTrailerStraight(10) or self.course:isCloseToLastWaypoint(2) then
+            self:debugSparse('Combine is late, waiting ...')
+            self:setMaxSpeed(0)
+        else
+            -- don't park with the trailer still angled from the alignment loop (it would stand
+            -- across the harvester's lane), creep forward until the rig is straight
+            self:debugSparse('Combine is late, creeping forward to straighten the trailer ...')
+            self:setMaxSpeed(5)
+        end
         -- stop confirming the rendezvous, allow the combine to time out if it can't get here on time
     else
         -- yes honey, I'm on my way!
